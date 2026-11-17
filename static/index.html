@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slide & PDF Smart Compressor - Nén PDF & PowerPoint Thông Minh</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-orb orb-3"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header glass-panel">
+            <div class="brand">
+                <div class="brand-logo" aria-hidden="true">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <path d="M12 18v-6"></path>
+                        <path d="M9 15l3 3 3-3"></path>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>Slide &amp; PDF Smart Compressor</h1>
+                    <p>Nén PDF &amp; PowerPoint Thông Minh — Giữ trọn độ sắc nét theo dung lượng mục tiêu</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="themeToggleBtn" class="icon-btn" type="button" title="Chuyển chế độ Sáng / Tối">
+                    <span id="themeIcon">☀️</span>
+                    <span id="themeLabel">Giao diện Sáng</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Step 1: Upload Zone -->
+            <section id="uploadSection" class="glass-panel section-card">
+                <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Tải tệp PDF hoặc PowerPoint lên">
+                    <input type="file" id="fileInput" accept=".pdf,.pptx,.ppt" hidden>
+                    <div class="drop-icon-wrap">
+                        <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                    </div>
+                    <h2>Kéo &amp; thả tệp vào đây hoặc nhấn để chọn tệp</h2>
+                    <p class="drop-subtitle">Hỗ trợ bài thuyết trình Canva, Slide thuyết trình lớn &amp; Tài liệu học thuật</p>
+                    <div class="supported-badges">
+                        <span class="format-badge pdf-badge">.PDF</span>
+                        <span class="format-badge pptx-badge">.PPTX</span>
+                        <span class="format-badge ppt-badge">.PPT</span>
+                    </div>
+                </div>
+                <div id="analyzeLoading" class="analyze-loading hidden">
+                    <div class="spinner"></div>
+                    <span id="analyzeStatusText">Đang phân tích cấu trúc tệp và trích xuất trang mẫu...</span>
+                </div>
+            </section>
+
+            <!-- Step 2: File Info & Smart Configuration Panel -->
+            <section id="configSection" class="glass-panel section-card hidden">
+                <div class="file-summary-bar">
+                    <div class="file-thumb-wrap" id="initialThumbWrap">
+                        <img id="initialPreviewImg" alt="Xem trước trang 1" class="hidden">
+                        <div id="initialThumbPlaceholder" class="thumb-placeholder">SLIDE</div>
+                    </div>
+                    <div class="file-meta">
+                        <div class="file-title-row">
+                            <span id="fileTypeBadge" class="format-badge pdf-badge">PDF</span>
+                            <h3 id="fileNameDisplay">ten_file.pdf</h3>
+                        </div>
+                        <div class="file-stats">
+                            <div class="stat-pill">
+                                <span class="stat-label">Dung lượng gốc:</span>
+                                <strong id="origSizeDisplay">0.00 MB</strong>
+                            </div>
+                            <div class="stat-pill">
+                                <span class="stat-label">Số trang / Slide:</span>
+                                <strong id="pageCountDisplay">0 trang</strong>
+                            </div>
+                            <div id="mediaCountPill" class="stat-pill hidden">
+                                <span class="stat-label">Tài nguyên ảnh:</span>
+                                <strong id="mediaCountDisplay">0 ảnh</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <button id="changeFileBtn" class="secondary-btn" type="button">Đổi tệp khác</button>
+                </div>
+
+                <hr class="divider">
+
+                <form id="compressForm" class="config-grid">
+                    <!-- Output Format Selector -->
+                    <div class="config-group">
+                        <label class="config-label">1. Định dạng xuất đầu ra</label>
+                        <!-- Options for PDF input -->
+                        <div id="pdfOutputOptions" class="radio-card-group">
+                            <label class="radio-card active" data-format="pdf">
+                                <input type="radio" name="output_format_pdf" value="pdf" checked>
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Xuất PDF nhẹ</div>
+                                    <div class="radio-desc">Tối ưu dung lượng chuẩn .PDF tương thích mọi thiết bị &amp; LMS</div>
+                                </div>
+                            </label>
+                        </div>
+                        <!-- Options for PPTX input -->
+                        <div id="pptxOutputOptions" class="radio-card-group hidden">
+                            <label class="radio-card active" data-format="pdf">
+                                <input type="radio" name="output_format_pptx" value="pdf" checked>
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Xuất sang PDF nhẹ</div>
+                                    <div class="radio-desc">Chuyển slide sang PDF sắc nét, khóa bố cục và font chữ</div>
+                                </div>
+                            </label>
+                            <label class="radio-card" data-format="pptx">
+                                <input type="radio" name="output_format_pptx" value="pptx">
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Giữ nguyên định dạng .PPTX nhẹ</div>
+                                    <div class="radio-desc">Nén trực tiếp toàn bộ ảnh trong slide, giữ nguyên hiệu ứng &amp; chỉnh sửa được</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Compression Mode Selector -->
+                    <div class="config-group" id="modeConfigGroup">
+                        <label class="config-label">2. Chế độ nén thông minh</label>
+                        <div class="radio-card-group">
+                            <label class="radio-card active" data-mode="flatten" id="modeFlattenCard">
+                                <input type="radio" name="compression_mode" value="flatten" checked>
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Gộp phẳng Slide (Tối ưu cho Canva / Slide nhiều ảnh)</div>
+                                    <div class="radio-desc">Gộp các lớp đồ họa phức tạp thành trang slide chuẩn HD, giảm tới 90% dung lượng mà vẫn sắc nét</div>
+                                </div>
+                            </label>
+                            <label class="radio-card" data-mode="vector" id="modeVectorCard">
+                                <input type="radio" name="compression_mode" value="vector">
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Giữ nguyên chữ Vector (Cho tài liệu học thuật / văn bản)</div>
+                                    <div class="radio-desc">Chỉ nén các hình ảnh nhúng bên trong, giữ nguyên 100% lớp chữ để bôi đen, copy và tìm kiếm</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Target Size Selector -->
+                    <div class="config-group">
+                        <label class="config-label">3. Dung lượng mục tiêu tối đa (Target Size)</label>
+                        <div class="target-size-controls">
+                            <div class="quick-pills" id="targetPills">
+                                <button type="button" class="pill-btn" data-mb="5">&lt; 5 MB</button>
+                                <button type="button" class="pill-btn active" data-mb="10">&lt; 10 MB</button>
+                                <button type="button" class="pill-btn" data-mb="15">&lt; 15 MB</button>
+                                <button type="button" class="pill-btn" data-mb="25">&lt; 25 MB</button>
+                            </div>
+                            <div class="custom-mb-wrap">
+                                <label for="targetMbInput">Tùy chỉnh (MB):</label>
+                                <input type="number" id="targetMbInput" min="0.5" max="200" step="0.5" value="10">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="action-bar">
+                        <button type="submit" id="startCompressBtn" class="primary-btn">
+                            <span>🚀 Bắt Đầu Nén Thông Minh</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Step 3: Live Progress Bar -->
+            <section id="progressSection" class="glass-panel section-card hidden">
+                <div class="progress-header">
+                    <div>
+                        <h3 id="progressStatusTitle">Đang xử lý trang 0/0...</h3>
+                        <p id="progressDetailText" class="progress-subtext">Thuật toán tự động cân chỉnh độ phân giải và chất lượng ảnh tối ưu</p>
+                    </div>
+                    <span id="progressPercentBadge" class="percent-badge">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div id="progressBarFill" class="progress-fill" style="width: 0%"></div>
+                </div>
+            </section>
+
+            <!-- Step 4: Results Dashboard -->
+            <section id="resultSection" class="glass-panel section-card hidden">
+                <div class="result-banner">
+                    <div class="result-title-group">
+                        <span class="success-icon">✨</span>
+                        <div>
+                            <h2>Nén Tệp Hoàn Tất!</h2>
+                            <p id="resultSubSummary">Tệp đã đạt chuẩn dung lượng mục tiêu với độ nét cao nhất.</p>
+                        </div>
+                    </div>
+                    <div id="savedPercentBadge" class="saved-badge">Giảm 0%</div>
+                </div>
+
+                <div class="metrics-comparison">
+                    <div class="metric-box before-box">
+                        <span class="metric-label">Dung lượng Trước khi nén</span>
+                        <strong id="resBeforeMb" class="metric-value">0.00 MB</strong>
+                    </div>
+                    <div class="metric-arrow">➔</div>
+                    <div class="metric-box after-box">
+                        <span class="metric-label">Dung lượng Sau khi nén</span>
+                        <strong id="resAfterMb" class="metric-value highlight-green">0.00 MB</strong>
+                    </div>
+                </div>
+
+                <!-- Download CTA -->
+                <div class="download-actions">
+                    <a id="downloadFileBtn" href="#" class="download-btn" download>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        <span>Tải File Đã Nén</span>
+                        <small id="downloadFilenameLabel"></small>
+                    </a>
+                    <button id="compressAnotherBtn" type="button" class="secondary-btn">Nén tệp khác</button>
+                </div>
+
+                <!-- Side-by-side Preview Comparison -->
+                <div id="previewComparisonPanel" class="preview-comparison-panel">
+                    <div class="preview-header">
+                        <h3>So sánh chất lượng Trước / Sau (Trang 1)</h3>
+                        <span class="preview-hint">Nhấn vào ảnh để phóng to kiểm tra độ sắc nét</span>
+                    </div>
+                    <div class="preview-grid">
+                        <div class="preview-card">
+                            <div class="preview-card-header">
+                                <span class="preview-tag">Bản gốc (Trước khi nén)</span>
+                                <span id="previewBeforeSizeTag">0 MB</span>
+                            </div>
+                            <div class="preview-img-container">
+                                <img id="beforePreviewImg" alt="Ảnh xem trước bản gốc Trang 1">
+                            </div>
+                        </div>
+                        <div class="preview-card">
+                            <div class="preview-card-header">
+                                <span class="preview-tag tag-after">Bản đã nén (Sau khi nén)</span>
+                                <span id="previewAfterSizeTag">0 MB</span>
+                            </div>
+                            <div class="preview-img-container">
+                                <img id="afterPreviewImg" alt="Ảnh xem trước bản sau nén Trang 1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Error Alert Banner -->
+            <div id="errorAlert" class="error-banner glass-panel hidden" role="alert">
+                <span class="error-icon">⚠️</span>
+                <span id="errorMessageText">Đã xảy ra lỗi.</span>
+                <button id="closeErrorBtn" type="button" class="icon-btn-sm">✕</button>
+            </div>
+        </main>
+
+        <!-- Image Zoom Modal -->
+        <div id="imageModal" class="modal-backdrop hidden">
+            <div class="modal-content glass-panel">
+                <div class="modal-header">
+                    <h4 id="modalTitle">Xem chi tiết chất lượng</h4>
+                    <button id="closeModalBtn" type="button" class="secondary-btn">Đóng</button>
+                </div>
+                <div class="modal-body">
+                    <img id="modalZoomImg" alt="Phóng to kiểm tra chất lượng">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
