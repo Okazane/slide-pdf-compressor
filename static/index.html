@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Slide & PDF Smart Compressor - Nén PDF & PowerPoint Thông Minh</title>
+    <title>Slide &amp; PDF Smart Compressor - Nén &amp; Trích Xuất PDF / PowerPoint Thông Minh</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -28,7 +28,7 @@
                 </div>
                 <div class="brand-text">
                     <h1>Slide &amp; PDF Smart Compressor</h1>
-                    <p>Nén PDF &amp; PowerPoint Thông Minh — Giữ trọn độ sắc nét theo dung lượng mục tiêu</p>
+                    <p>Nén PDF / PowerPoint theo dung lượng mục tiêu &amp; Giải nén tài nguyên ảnh / Slide (.ZIP)</p>
                 </div>
             </div>
             <div class="header-actions">
@@ -53,7 +53,7 @@
                         </svg>
                     </div>
                     <h2>Kéo &amp; thả tệp vào đây hoặc nhấn để chọn tệp</h2>
-                    <p class="drop-subtitle">Hỗ trợ bài thuyết trình Canva, Slide thuyết trình lớn &amp; Tài liệu học thuật</p>
+                    <p class="drop-subtitle">Hỗ trợ bài thuyết trình Canva, Slide thuyết trình lớn &amp; Tài liệu học thuật (tối đa 500 MB)</p>
                     <div class="supported-badges">
                         <span class="format-badge pdf-badge">.PDF</span>
                         <span class="format-badge pptx-badge">.PPTX</span>
@@ -98,6 +98,17 @@
 
                 <hr class="divider">
 
+                <!-- Action Mode Tabs -->
+                <div id="actionModeTabs" class="action-mode-tabs" role="tablist" aria-label="Chọn tính năng xử lý">
+                    <button type="button" id="tabCompressBtn" class="action-tab-btn active" data-action-tab="compress" role="tab" aria-selected="true">
+                        <span>🗜️ Nén Thông Minh</span>
+                    </button>
+                    <button type="button" id="tabExtractBtn" class="action-tab-btn" data-action-tab="extract" role="tab" aria-selected="false">
+                        <span>📦 Giải Nén / Trích Xuất (.ZIP)</span>
+                    </button>
+                </div>
+
+                <!-- Tab 1: Smart Compression Form -->
                 <form id="compressForm" class="config-grid">
                     <!-- Output Format Selector -->
                     <div class="config-group">
@@ -112,16 +123,16 @@
                                 </div>
                             </label>
                         </div>
-                        <!-- Options for PPTX input -->
+                        <!-- Options for PPTX / PPT input -->
                         <div id="pptxOutputOptions" class="radio-card-group hidden">
-                            <label class="radio-card active" data-format="pdf">
+                            <label class="radio-card active" data-format="pdf" id="pptxPdfOptionCard">
                                 <input type="radio" name="output_format_pptx" value="pdf" checked>
                                 <div class="radio-card-body">
                                     <div class="radio-title">Xuất sang PDF nhẹ</div>
                                     <div class="radio-desc">Chuyển slide sang PDF sắc nét, khóa bố cục và font chữ</div>
                                 </div>
                             </label>
-                            <label class="radio-card" data-format="pptx">
+                            <label class="radio-card" data-format="pptx" id="pptxDirectOptionCard">
                                 <input type="radio" name="output_format_pptx" value="pptx">
                                 <div class="radio-card-body">
                                     <div class="radio-title">Giữ nguyên định dạng .PPTX nhẹ</div>
@@ -129,6 +140,9 @@
                                 </div>
                             </label>
                         </div>
+                        <p id="pptLegacyCompressHint" class="legacy-hint hidden">
+                            ℹ️ Định dạng <strong>.PPT cũ</strong> không hỗ trợ nén trực tiếp sang .PPTX — hệ thống tự động chọn chuyển đổi và nén sang <strong>.PDF nhẹ</strong>.
+                        </p>
                     </div>
 
                     <!-- Compression Mode Selector -->
@@ -175,13 +189,45 @@
                         </button>
                     </div>
                 </form>
+
+                <!-- Tab 2: Resource Extraction Form -->
+                <form id="extractForm" class="config-grid hidden">
+                    <div class="config-group">
+                        <label class="config-label">Chọn chế độ giải nén &amp; trích xuất gói .ZIP</label>
+                        <div class="radio-card-group">
+                            <label class="radio-card active" data-extract="images" id="extractImagesCard">
+                                <input type="radio" name="extract_mode" value="images" checked>
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Trích xuất toàn bộ ảnh gốc nhúng trong tệp</div>
+                                    <div class="radio-desc">Tách nguyên bản các ảnh gốc độ phân giải cao trong PDF / PPTX (tự động khử trùng lặp) thành gói .ZIP</div>
+                                </div>
+                            </label>
+                            <label class="radio-card" data-extract="slides" id="extractSlidesCard">
+                                <input type="radio" name="extract_mode" value="slides">
+                                <div class="radio-card-body">
+                                    <div class="radio-title">Tách từng trang / slide thành bộ ảnh HD (.JPG)</div>
+                                    <div class="radio-desc">Kết xuất từng trang tài liệu hoặc từng slide thuyết trình ra bộ ảnh chuẩn Full HD sắc nét đóng gói .ZIP</div>
+                                </div>
+                            </label>
+                        </div>
+                        <p id="pptLegacyExtractHint" class="legacy-hint hidden">
+                            ℹ️ Định dạng <strong>.PPT cũ</strong> chỉ hỗ trợ tách từng slide thành bộ ảnh HD (.JPG). Nếu cần lấy ảnh nhúng gốc, vui lòng lưu tệp sang .PPTX.
+                        </p>
+                    </div>
+
+                    <div class="action-bar">
+                        <button type="submit" id="startExtractBtn" class="primary-btn extract-submit-btn">
+                            <span>📦 Bắt Đầu Giải Nén Tài Nguyên</span>
+                        </button>
+                    </div>
+                </form>
             </section>
 
             <!-- Step 3: Live Progress Bar -->
             <section id="progressSection" class="glass-panel section-card hidden">
                 <div class="progress-header">
                     <div>
-                        <h3 id="progressStatusTitle">Đang xử lý trang 0/0...</h3>
+                        <h3 id="progressStatusTitle">Đang xử lý 0/0...</h3>
                         <p id="progressDetailText" class="progress-subtext">Thuật toán tự động cân chỉnh độ phân giải và chất lượng ảnh tối ưu</p>
                     </div>
                     <span id="progressPercentBadge" class="percent-badge">0%</span>
@@ -195,9 +241,9 @@
             <section id="resultSection" class="glass-panel section-card hidden">
                 <div class="result-banner">
                     <div class="result-title-group">
-                        <span class="success-icon">✨</span>
+                        <span id="resultStatusIcon" class="success-icon">✨</span>
                         <div>
-                            <h2>Nén Tệp Hoàn Tất!</h2>
+                            <h2 id="resultMainTitle">Nén Tệp Hoàn Tất!</h2>
                             <p id="resultSubSummary">Tệp đã đạt chuẩn dung lượng mục tiêu với độ nét cao nhất.</p>
                         </div>
                     </div>
@@ -206,12 +252,12 @@
 
                 <div class="metrics-comparison">
                     <div class="metric-box before-box">
-                        <span class="metric-label">Dung lượng Trước khi nén</span>
+                        <span id="resBeforeLabel" class="metric-label">Dung lượng Trước khi nén</span>
                         <strong id="resBeforeMb" class="metric-value">0.00 MB</strong>
                     </div>
                     <div class="metric-arrow">➔</div>
                     <div class="metric-box after-box">
-                        <span class="metric-label">Dung lượng Sau khi nén</span>
+                        <span id="resAfterLabel" class="metric-label">Dung lượng Sau khi nén</span>
                         <strong id="resAfterMb" class="metric-value highlight-green">0.00 MB</strong>
                     </div>
                 </div>
@@ -224,13 +270,13 @@
                             <polyline points="7 10 12 15 17 10"></polyline>
                             <line x1="12" y1="15" x2="12" y2="3"></line>
                         </svg>
-                        <span>Tải File Đã Nén</span>
+                        <span id="downloadBtnText">Tải File Đã Nén</span>
                         <small id="downloadFilenameLabel"></small>
                     </a>
                     <button id="compressAnotherBtn" type="button" class="secondary-btn">Nén tệp khác</button>
                 </div>
 
-                <!-- Side-by-side Preview Comparison -->
+                <!-- Side-by-side Preview Comparison (Compress Mode) -->
                 <div id="previewComparisonPanel" class="preview-comparison-panel">
                     <div class="preview-header">
                         <h3>So sánh chất lượng Trước / Sau (Trang 1)</h3>
@@ -253,6 +299,25 @@
                             </div>
                             <div class="preview-img-container">
                                 <img id="afterPreviewImg" alt="Ảnh xem trước bản sau nén Trang 1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Single Preview Panel (Extract Mode) -->
+                <div id="extractPreviewPanel" class="preview-comparison-panel hidden">
+                    <div class="preview-header">
+                        <h3>Xem trước mẫu tài nguyên đã trích xuất</h3>
+                        <span class="preview-hint">Nhấn vào ảnh để phóng to kiểm tra độ nét</span>
+                    </div>
+                    <div class="single-preview-wrap">
+                        <div class="preview-card">
+                            <div class="preview-card-header">
+                                <span class="preview-tag tag-after">Mẫu ảnh / Slide trong gói .ZIP</span>
+                                <span id="extractPreviewCountTag">0 mục</span>
+                            </div>
+                            <div class="preview-img-container">
+                                <img id="extractSamplePreviewImg" alt="Ảnh mẫu trong gói ZIP trích xuất">
                             </div>
                         </div>
                     </div>
