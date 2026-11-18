@@ -1,8 +1,5 @@
-import base64
-import json
 import os
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -12,7 +9,6 @@ from typing import Any, Dict
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,26 +17,13 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-IS_SERVERLESS = bool(
-    os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
-)
+UPLOADS_DIR = BASE_DIR / "uploads"
+OUTPUTS_DIR = BASE_DIR / "outputs"
 STATIC_DIR = BASE_DIR / "static"
 
-if IS_SERVERLESS:
-    RUNTIME_TMP_DIR = Path(tempfile.gettempdir()) / "slide_pdf_compressor"
-    UPLOADS_DIR = RUNTIME_TMP_DIR / "uploads"
-    OUTPUTS_DIR = RUNTIME_TMP_DIR / "outputs"
-    MANIFESTS_DIR = RUNTIME_TMP_DIR / "manifests"
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
-else:
-    UPLOADS_DIR = BASE_DIR / "uploads"
-    OUTPUTS_DIR = BASE_DIR / "outputs"
-    MANIFESTS_DIR = None
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="Slide & PDF Smart Compressor",
@@ -66,64 +49,6 @@ ALLOWED_EXTENSIONS = {".pdf", ".pptx", ".ppt"}
 UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MB
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 DEFAULT_CLEANUP_TTL_SECONDS = 7200  # 2 hours
-
-
-def _ext_to_media_type(ext: str) -> str:
-    ext_lower = ext.lower()
-    if ext_lower == ".pdf":
-        return "application/pdf"
-    if ext_lower == ".pptx":
-        return (
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        )
-    if ext_lower == ".zip":
-        return "application/zip"
-    return "application/octet-stream"
-
-
-def _maybe_attach_serverless_inline_download(
-    full_result: Dict[str, Any], output_path: str, output_filename: str
-) -> None:
-    """In serverless mode, embed files <= 2.5 MB as base64 so downloads succeed across stateless instances."""
-    if not IS_SERVERLESS:
-        return
-    try:
-        out_p = Path(output_path)
-        if out_p.exists() and out_p.stat().st_size <= 2_600_000:
-            raw = out_p.read_bytes()
-            full_result["download_data_b64"] = base64.b64encode(raw).decode("ascii")
-            full_result["download_mime"] = _ext_to_media_type(
-                Path(output_filename).suffix
-            )
-    except Exception:
-        pass
-
-
-def _persist_serverless_job(job_id: str) -> None:
-    if not IS_SERVERLESS or MANIFESTS_DIR is None or job_id not in JOBS:
-        return
-    try:
-        manifest_path = MANIFESTS_DIR / f"{job_id}.json"
-        manifest_path.write_text(
-            json.dumps(JOBS[job_id], ensure_ascii=False), encoding="utf-8"
-        )
-    except Exception:
-        pass
-
-
-def _resolve_job(job_id: str) -> Dict[str, Any]:
-    if job_id in JOBS:
-        return JOBS[job_id]
-    if IS_SERVERLESS and MANIFESTS_DIR is not None:
-        manifest_path = MANIFESTS_DIR / f"{job_id}.json"
-        if manifest_path.exists():
-            try:
-                loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
-                JOBS[job_id] = loaded
-                return loaded
-            except Exception:
-                pass
-    raise HTTPException(status_code=404, detail=f"Không tìm thấy job_id: {job_id}")
 
 
 def _ext_to_file_type(ext: str) -> str:
@@ -533,9 +458,6 @@ def _run_compression_worker(
             "after_preview_base64": after_preview,
             "download_url": download_url,
         }
-        _maybe_attach_serverless_inline_download(
-            full_result, output_path, download_filename
-        )
 
         total_done = (
             result.get("page_count")
@@ -568,7 +490,6 @@ def _run_compression_worker(
                 "result": full_result,
             }
         )
-        _persist_serverless_job(job_id)
     except Exception as exc:
         traceback.print_exc()
         job.update(
@@ -578,7 +499,6 @@ def _run_compression_worker(
                 "error": str(exc),
             }
         )
-        _persist_serverless_job(job_id)
 
 
 def _run_extraction_worker(
@@ -647,9 +567,6 @@ def _run_extraction_worker(
             "preview_base64": preview_b64,
             "download_url": download_url,
         }
-        _maybe_attach_serverless_inline_download(
-            full_result, output_path, output_filename
-        )
 
         total_done = max(extracted_count, int(job.get("progress_total") or 1))
         job.update(
@@ -673,7 +590,6 @@ def _run_extraction_worker(
                 "result": full_result,
             }
         )
-        _persist_serverless_job(job_id)
     except Exception as exc:
         traceback.print_exc()
         job.update(
@@ -683,7 +599,6 @@ def _run_extraction_worker(
                 "error": str(exc),
             }
         )
-        _persist_serverless_job(job_id)
 
 
 @app.post("/api/compress")
@@ -742,12 +657,6 @@ async def start_compression(request: Request):
         "error": None,
         "created_at": time.time(),
     }
-
-    if IS_SERVERLESS:
-        await run_in_threadpool(
-            _run_compression_worker, job_id, file_info, target_mb, mode, output_format
-        )
-        return await get_job_status(job_id)
 
     worker = threading.Thread(
         target=_run_compression_worker,
@@ -818,12 +727,6 @@ async def start_extraction(request: Request):
         "created_at": time.time(),
     }
 
-    if IS_SERVERLESS:
-        await run_in_threadpool(
-            _run_extraction_worker, job_id, file_info, extract_mode
-        )
-        return await get_job_status(job_id)
-
     worker = threading.Thread(
         target=_run_extraction_worker,
         args=(job_id, file_info, extract_mode),
@@ -845,7 +748,10 @@ async def start_extraction(request: Request):
 
 @app.get("/api/job/{job_id}")
 async def get_job_status(job_id: str):
-    job = _resolve_job(job_id)
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy job_id: {job_id}")
+
+    job = JOBS[job_id]
     job_type = job.get("job_type", "compress")
 
     response: Dict[str, Any] = {
@@ -908,7 +814,10 @@ async def get_job_status(job_id: str):
 
 @app.get("/api/download/{job_id}")
 async def download_compressed_file(job_id: str):
-    job = _resolve_job(job_id)
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy job_id: {job_id}")
+
+    job = JOBS[job_id]
     if job["status"] != "done":
         raise HTTPException(
             status_code=400,

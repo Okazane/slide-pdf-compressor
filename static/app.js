@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function safeParseResponse(response) {
         if (response.status === 413) {
-            throw new Error('Dung lượng tệp vượt giới hạn tải trực tiếp trên máy chủ đám mây (~4.5 MB với gói Vercel miễn phí). Với tệp lớn tới 500 MB, vui lòng chạy bản máy cục bộ (run.bat).');
+            throw new Error('Dung lượng tệp vượt giới hạn tối đa cho phép (500 MB).');
         }
         const text = await response.text();
         try {
