@@ -76,7 +76,7 @@ function isNavigationOrHtml(request, url) {
     if (request.mode === 'navigate') return true;
     const accept = request.headers.get('accept') || '';
     if (accept.includes('text/html')) return true;
-    return url.pathname === '/' || url.pathname.endsWith('.html');
+    return url.pathname.endsWith('/') || url.pathname.endsWith('.html');
 }
 
 function isImmutableVendorOrFont(url) {
@@ -104,11 +104,15 @@ self.addEventListener('fetch', (event) => {
                     if (networkRes && networkRes.ok) {
                         const cloneForReq = networkRes.clone();
                         const cloneForShell = networkRes.clone();
-                        const cache = await caches.open(CACHE_NAME);
-                        await Promise.all([
-                            cache.put(request, cloneForReq),
-                            cache.put('./index.html', cloneForShell),
-                        ]);
+                        try {
+                            const cache = await caches.open(CACHE_NAME);
+                            await Promise.all([
+                                cache.put(request, cloneForReq),
+                                cache.put('./index.html', cloneForShell),
+                            ]);
+                        } catch (_cacheErr) {
+                            // Never fail a successful network response if Cache Storage quota/permissions reject
+                        }
                     }
                     return networkRes;
                 } catch (_err) {
@@ -133,8 +137,12 @@ self.addEventListener('fetch', (event) => {
                     const networkRes = await fetch(request);
                     if (networkRes && networkRes.ok) {
                         const copy = networkRes.clone();
-                        const cache = await caches.open(CACHE_NAME);
-                        await cache.put(request, copy);
+                        try {
+                            const cache = await caches.open(CACHE_NAME);
+                            await cache.put(request, copy);
+                        } catch (_cacheErr) {
+                            // Ignore cache write error and still return valid networkRes
+                        }
                     }
                     return networkRes;
                 } catch (_err) {

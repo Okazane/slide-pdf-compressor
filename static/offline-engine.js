@@ -409,9 +409,24 @@ function pageBaseFactor(wPt, hPt) {
     return factor;
 }
 
-async function renderPdfPageToCanvas(pdfDoc, pageNumber, renderScale, targetCanvas) {
+async function renderPdfPageToCanvas(pdfDoc, pageNumber, renderScale, targetCanvas, signal) {
+    throwIfAborted(signal);
     const page = await pdfDoc.getPage(pageNumber);
+    let renderTask = null;
+    const onAbort = () => {
+        if (renderTask && typeof renderTask.cancel === 'function') {
+            try {
+                renderTask.cancel();
+            } catch (_err) {
+                // Ignore cancel error
+            }
+        }
+    };
+    if (signal && typeof signal.addEventListener === 'function') {
+        signal.addEventListener('abort', onAbort, { once: true });
+    }
     try {
+        throwIfAborted(signal);
         const baseVp = page.getViewport({ scale: 1.0 });
         const rawVp = page.getViewport({ scale: renderScale });
         const safeDims = clampCanvasDimensions(rawVp.width, rawVp.height);
@@ -426,7 +441,16 @@ async function renderPdfPageToCanvas(pdfDoc, pageNumber, renderScale, targetCanv
         const ctx = canvas.getContext('2d', { alpha: false });
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        renderTask = page.render({ canvasContext: ctx, viewport });
+        try {
+            await renderTask.promise;
+        } catch (renderErr) {
+            if (signal && signal.aborted) {
+                throw createAbortError();
+            }
+            throw renderErr;
+        }
+        throwIfAborted(signal);
         return {
             canvas,
             wPt: baseVp.width,
@@ -435,6 +459,9 @@ async function renderPdfPageToCanvas(pdfDoc, pageNumber, renderScale, targetCanv
             pxH: canvas.height,
         };
     } finally {
+        if (signal && typeof signal.removeEventListener === 'function') {
+            signal.removeEventListener('abort', onAbort);
+        }
         page.cleanup();
     }
 }
@@ -973,10 +1000,11 @@ export async function inspectFileOffline(file, signal) {
 
                 const maxPt = Math.max(width, height, 1.0);
                 const thumbScale = Math.min(1.0, 1280.0 / maxPt);
-                await renderPdfPageToCanvas(pdfDoc, 1, thumbScale, canvas);
+                await renderPdfPageToCanvas(pdfDoc, 1, thumbScale, canvas, signal);
                 previewBase64 = await canvasToJpegDataUri(canvas, 0.80);
             }
             const mediaCount = await countUniquePdfEmbeddedImages(rawBytes);
+            throwIfAborted(signal);
             return {
                 filename: file.name,
                 file_type: 'pdf',
@@ -1001,6 +1029,7 @@ export async function inspectFileOffline(file, signal) {
         throw new Error('Tệp .pptx bị hỏng hoặc không đúng cấu trúc gói ZIP.');
     }
     if (!isZip) {
+        throwIfAborted(signal);
         // Legacy binary .ppt (97-2003 OLE2)
         return {
             filename: file.name,
@@ -1038,6 +1067,7 @@ export async function inspectFileOffline(file, signal) {
         }
     }
 
+    throwIfAborted(signal);
     return {
         filename: file.name,
         file_type: 'pptx',
@@ -1194,7 +1224,7 @@ async function compressPdfFlattenOffline(rawPdfBytes, targetMb, onProgress, sign
             page.cleanup();
             const bf = pageBaseFactor(vp1.width, vp1.height);
             const sc = document.createElement('canvas');
-            await renderPdfPageToCanvas(pdfDoc, pNum, 1.0 * bf, sc);
+            await renderPdfPageToCanvas(pdfDoc, pNum, 1.0 * bf, sc, signal);
             sampleCanvases.push(sc);
         }
 
@@ -1240,7 +1270,7 @@ async function compressPdfFlattenOffline(rawPdfBytes, targetMb, onProgress, sign
             page.cleanup();
 
             const renderScale = chosenScale * pageBaseFactor(vp1.width, vp1.height);
-            const rendered = await renderPdfPageToCanvas(pdfDoc, pNum, renderScale, workCanvas);
+            const rendered = await renderPdfPageToCanvas(pdfDoc, pNum, renderScale, workCanvas, signal);
             const jpegBytes = await canvasToBytes(workCanvas, 'image/jpeg', chosenQuality);
             initialBuffers.push({
                 jpegBytes,
@@ -1499,7 +1529,7 @@ export async function compressPdfOffline(file, options, onProgress, signal) {
         const c = document.createElement('canvas');
         try {
             if (doc.numPages > 0) {
-                await renderPdfPageToCanvas(doc, 1, 1.0, c);
+                await renderPdfPageToCanvas(doc, 1, 1.0, c, signal);
                 beforePreview = await canvasToJpegDataUri(c, 0.82);
             }
         } finally {
@@ -1532,10 +1562,11 @@ export async function compressPdfOffline(file, options, onProgress, signal) {
         const c = document.createElement('canvas');
         try {
             if (outDoc.numPages > 0) {
-                await renderPdfPageToCanvas(outDoc, 1, 1.0, c);
+                await renderPdfPageToCanvas(outDoc, 1, 1.0, c, signal);
                 afterPreview = await canvasToJpegDataUri(c, 0.82);
             }
-        } catch (_err) {
+        } catch (err) {
+            if (err && err.name === 'AbortError') throw err;
             afterPreview = beforePreview;
         } finally {
             releaseCanvas(c);
@@ -1543,6 +1574,7 @@ export async function compressPdfOffline(file, options, onProgress, signal) {
         }
     }
 
+    throwIfAborted(signal);
     const outputFilename = `${getStem(file.name)}_compressed.pdf`;
     const blob = new Blob([finalBytes], { type: 'application/pdf' });
 
@@ -1916,6 +1948,7 @@ export async function compressPptxDirectOffline(file, options, onProgress, signa
         }
     }
 
+    throwIfAborted(signal);
     const compressedSizeBytes = bestOutBytes.byteLength;
     const compressedSizeMb = Math.round((compressedSizeBytes / (1024 * 1024)) * 100) / 100;
     const reductionPercent = originalSizeBytes > 0
@@ -2026,16 +2059,18 @@ export async function convertPptxToPdfOffline(file, options, onProgress, signal)
     const prevCanvas = document.createElement('canvas');
     try {
         if (outDoc.numPages > 0) {
-            await renderPdfPageToCanvas(outDoc, 1, 1.0, prevCanvas);
+            await renderPdfPageToCanvas(outDoc, 1, 1.0, prevCanvas, signal);
             afterPreview = await canvasToJpegDataUri(prevCanvas, 0.82);
         }
-    } catch (_err) {
+    } catch (err) {
+        if (err && err.name === 'AbortError') throw err;
         afterPreview = beforePreview;
     } finally {
         releaseCanvas(prevCanvas);
         await outDoc.destroy();
     }
 
+    throwIfAborted(signal);
     return {
         status: 'done',
         job_type: 'compress',
@@ -2235,7 +2270,7 @@ async function renderPdfPagesToZipOffline(rawPdfBytes, outZip, folder, prefix, o
             const maxPt = Math.max(vp1.width, vp1.height, 1.0);
             const scale = Math.max(0.5, Math.min(4.0, 1920.0 / maxPt));
 
-            await renderPdfPageToCanvas(pdfDoc, pNum, scale, canvas);
+            await renderPdfPageToCanvas(pdfDoc, pNum, scale, canvas, signal);
             if (!previewBase64) {
                 previewBase64 = await canvasToJpegDataUri(canvas, 0.82);
             }
@@ -2416,6 +2451,7 @@ export async function extractArchiveOffline(file, extractMode, onProgress, signa
         compression: 'DEFLATE',
         compressionOptions: { level: 6 },
     });
+    throwIfAborted(signal);
     const zipSizeBytes = zipBytes.byteLength;
     const zipSizeMb = Math.round((zipSizeBytes / (1024 * 1024)) * 10000) / 10000;
 

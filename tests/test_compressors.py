@@ -1227,8 +1227,9 @@ def test_security_fix1_hex_id_glob_traversal_and_pwa_routes(tmp_path: Path):
     assert hdata["status"] == "ok"
     assert hdata["engine"] == "local-python"
 
-    # PWA root static assets served cleanly
+    # PWA root static assets served cleanly (including /static/ with html=True)
     for route in [
+        "/static/",
         "/manifest.json",
         "/sw.js",
         "/favicon.svg",

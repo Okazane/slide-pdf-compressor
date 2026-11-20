@@ -18,6 +18,13 @@ const dbModuleUrl = pathToFileURL(path.join(STATIC_DIR, 'db.js')).href;
 const {
     MAX_BACKUP_BYTES,
     MAX_HISTORY_ITEMS,
+    addHistoryEntry,
+    clearLocalDatabase,
+    exportDatabaseToJson,
+    importDatabaseFromJson,
+    listHistoryEntries,
+    loadPreferences,
+    savePreferences,
     validateBackupJsonText,
     validateHistoryRecord,
     validatePreferences,
@@ -37,8 +44,8 @@ const {
 } = await import(engineModuleUrl);
 
 let passed = 0;
-function check(name, fn) {
-    fn();
+async function check(name, fn) {
+    await fn();
     passed++;
     console.log(`  [PASS] ${name}`);
 }
@@ -277,6 +284,40 @@ check('Enforces <= 500 MB file bound, <= 64 MP pixel cap, ZIP bomb & XML DTD/ENT
     throwIfAborted(ctrl.signal);
     ctrl.abort();
     assert.throws(() => throwIfAborted(ctrl.signal), { name: 'AbortError' });
+});
+
+await check('Resilient in-memory fallback when IndexedDB is blocked or unavailable (Private Browsing)', async () => {
+    const saved = await savePreferences({ theme: 'light', targetMb: 15, mode: 'vector', outputFormat: 'pptx' });
+    assert.equal(saved.theme, 'light');
+    assert.equal(saved.targetMb, 15);
+
+    await addHistoryEntry({
+        filename: 'test_private.pdf',
+        fileType: 'pdf',
+        jobType: 'compress',
+        mode: 'flatten',
+        outputFormat: 'pdf',
+        targetMb: 10,
+        targetMet: true,
+        originalSizeMb: 8,
+        compressedSizeMb: 3,
+        reductionPercent: 62.5,
+        itemCount: 4,
+        previewBase64: validJpegDataUri,
+        createdAt: 1760000000000,
+    });
+    const list = await listHistoryEntries();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].filename, 'test_private.pdf');
+
+    const exported = await exportDatabaseToJson();
+    await clearLocalDatabase();
+    assert.equal((await listHistoryEntries()).length, 0);
+
+    const imported = await importDatabaseFromJson(exported);
+    assert.equal(imported.importedCount, 1);
+    assert.equal((await loadPreferences()).theme, 'light');
+    await clearLocalDatabase();
 });
 
 console.log(`\nALL ${passed} OFFLINE PWA & SECURITY VERIFICATION CHECKS PASSED!`);

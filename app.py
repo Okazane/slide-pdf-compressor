@@ -266,7 +266,7 @@ async def _unhandled_exception_handler(_request: Request, _exc: Exception):
 
 
 # Mount /static for backward compatibility + PWA asset directories at root
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 app.mount("/fonts", StaticFiles(directory=str(STATIC_DIR / "fonts")), name="fonts")
 app.mount("/vendor", StaticFiles(directory=str(STATIC_DIR / "vendor")), name="vendor")
 app.mount("/icons", StaticFiles(directory=str(STATIC_DIR / "icons")), name="icons")

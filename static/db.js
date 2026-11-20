@@ -303,22 +303,32 @@ export function validateBackupJsonText(rawText) {
 }
 
 let dbInstance = null;
+let memoryPreferences = { ...DEFAULT_PREFERENCES };
+let memoryHistory = [];
 
 export function getSlideCompressorDB() {
     if (dbInstance) {
         return dbInstance;
     }
+    const hasIndexedDB =
+        typeof globalThis !== 'undefined' &&
+        typeof globalThis.indexedDB !== 'undefined' &&
+        globalThis.indexedDB !== null;
     const DexieCtor = typeof globalThis !== 'undefined' ? globalThis.Dexie : undefined;
-    if (!DexieCtor) {
+    if (!hasIndexedDB || !DexieCtor) {
         return null;
     }
-    const db = new DexieCtor('SlideCompressorDB');
-    db.version(1).stores({
-        preferences: 'id',
-        history: '++id, createdAt, jobType, fileType',
-    });
-    dbInstance = db;
-    return db;
+    try {
+        const db = new DexieCtor('SlideCompressorDB');
+        db.version(1).stores({
+            preferences: 'id',
+            history: '++id, createdAt, jobType, fileType',
+        });
+        dbInstance = db;
+        return db;
+    } catch (_err) {
+        return null;
+    }
 }
 
 export async function requestPersistentStorage() {
@@ -339,16 +349,18 @@ export async function requestPersistentStorage() {
 export async function loadPreferences() {
     const db = getSlideCompressorDB();
     if (!db) {
-        return { ...DEFAULT_PREFERENCES };
+        return { ...memoryPreferences };
     }
     try {
         const stored = await db.table('preferences').get('user_prefs');
         if (!stored) {
-            return { ...DEFAULT_PREFERENCES };
+            return { ...memoryPreferences };
         }
-        return validatePreferences(stored);
+        const valid = validatePreferences(stored);
+        memoryPreferences = { ...valid };
+        return valid;
     } catch (_err) {
-        return { ...DEFAULT_PREFERENCES };
+        return { ...memoryPreferences };
     }
 }
 
@@ -358,9 +370,14 @@ export async function savePreferences(partialPrefs) {
         ...current,
         ...partialPrefs,
     });
+    memoryPreferences = { ...merged };
     const db = getSlideCompressorDB();
     if (db) {
-        await db.table('preferences').put(merged);
+        try {
+            await db.table('preferences').put(merged);
+        } catch (_err) {
+            // Gracefully fall back to in-memory preferences if IndexedDB is blocked
+        }
     }
     return merged;
 }
@@ -370,34 +387,52 @@ export async function addHistoryEntry(entryInput) {
         ...entryInput,
         createdAt: entryInput.createdAt ?? Date.now(),
     });
+    memoryHistory = [record, ...memoryHistory]
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, MAX_HISTORY_ITEMS);
+
     const db = getSlideCompressorDB();
     if (!db) {
         return record;
     }
-    const table = db.table('history');
-    await db.transaction('rw', table, async () => {
-        await table.add(record);
-        const allDesc = await table.orderBy('createdAt').reverse().toArray();
-        if (allDesc.length > MAX_HISTORY_ITEMS) {
-            const staleIds = allDesc
-                .slice(MAX_HISTORY_ITEMS)
-                .map((item) => item.id)
-                .filter((id) => id !== undefined);
-            if (staleIds.length > 0) {
-                await table.bulkDelete(staleIds);
+    try {
+        const table = db.table('history');
+        await db.transaction('rw', table, async () => {
+            await table.add(record);
+            const allDesc = await table.orderBy('createdAt').reverse().toArray();
+            if (allDesc.length > MAX_HISTORY_ITEMS) {
+                const staleIds = allDesc
+                    .slice(MAX_HISTORY_ITEMS)
+                    .map((item) => item.id)
+                    .filter((id) => id !== undefined);
+                if (staleIds.length > 0) {
+                    await table.bulkDelete(staleIds);
+                }
             }
-        }
-    });
+        });
+    } catch (_err) {
+        // Gracefully fall back to in-memory history if IndexedDB is blocked
+    }
     return record;
 }
 
 export async function listHistoryEntries() {
     const db = getSlideCompressorDB();
     if (!db) {
-        return [];
+        return [...memoryHistory];
     }
-    const rows = await db.table('history').orderBy('createdAt').reverse().limit(MAX_HISTORY_ITEMS).toArray();
-    return rows;
+    try {
+        const rows = await db
+            .table('history')
+            .orderBy('createdAt')
+            .reverse()
+            .limit(MAX_HISTORY_ITEMS)
+            .toArray();
+        memoryHistory = rows;
+        return rows;
+    } catch (_err) {
+        return [...memoryHistory];
+    }
 }
 
 export async function exportDatabaseToJson() {
@@ -424,25 +459,33 @@ export async function exportDatabaseToJson() {
 
 export async function importDatabaseFromJson(rawText) {
     const validated = validateBackupJsonText(rawText);
-    const db = getSlideCompressorDB();
-    if (!db) {
-        throw new Error('Trình duyệt hiện tại không hỗ trợ lưu trữ IndexedDB.');
+    if (validated.preferences) {
+        memoryPreferences = { ...validated.preferences };
     }
-    const prefTable = db.table('preferences');
-    const histTable = db.table('history');
+    const sorted = [...validated.history]
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, MAX_HISTORY_ITEMS);
+    memoryHistory = sorted;
 
-    await db.transaction('rw', prefTable, histTable, async () => {
-        if (validated.preferences) {
-            await prefTable.put(validated.preferences);
+    const db = getSlideCompressorDB();
+    if (db) {
+        try {
+            const prefTable = db.table('preferences');
+            const histTable = db.table('history');
+
+            await db.transaction('rw', prefTable, histTable, async () => {
+                if (validated.preferences) {
+                    await prefTable.put(validated.preferences);
+                }
+                await histTable.clear();
+                if (sorted.length > 0) {
+                    await histTable.bulkAdd(sorted);
+                }
+            });
+        } catch (_err) {
+            // Keep imported state in memory if IndexedDB throws in private browsing
         }
-        await histTable.clear();
-        if (validated.history.length > 0) {
-            const sorted = [...validated.history]
-                .sort((a, b) => b.createdAt - a.createdAt)
-                .slice(0, MAX_HISTORY_ITEMS);
-            await histTable.bulkAdd(sorted);
-        }
-    });
+    }
 
     return {
         preferences: validated.preferences || (await loadPreferences()),
@@ -451,14 +494,20 @@ export async function importDatabaseFromJson(rawText) {
 }
 
 export async function clearLocalDatabase() {
+    memoryPreferences = { ...DEFAULT_PREFERENCES };
+    memoryHistory = [];
     const db = getSlideCompressorDB();
     if (!db) {
         return;
     }
-    const prefTable = db.table('preferences');
-    const histTable = db.table('history');
-    await db.transaction('rw', prefTable, histTable, async () => {
-        await prefTable.clear();
-        await histTable.clear();
-    });
+    try {
+        const prefTable = db.table('preferences');
+        const histTable = db.table('history');
+        await db.transaction('rw', prefTable, histTable, async () => {
+            await prefTable.clear();
+            await histTable.clear();
+        });
+    } catch (_err) {
+        // Ignore IndexedDB error after clearing in-memory store
+    }
 }

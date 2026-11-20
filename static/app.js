@@ -173,7 +173,7 @@ function initApp() {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 1200);
         try {
-            const resp = await fetch('./api/health', {
+            const resp = await fetch('/api/health', {
                 method: 'GET',
                 cache: 'no-store',
                 signal: ctrl.signal,
@@ -274,6 +274,7 @@ function initApp() {
             clearInterval(pollTimer);
             pollTimer = null;
         }
+        fileInput.value = '';
         analyzeLoading.classList.add('hidden');
         progressSection.classList.add('hidden');
         reenableActionButtons();
@@ -437,7 +438,9 @@ function initApp() {
 
     fileInput.addEventListener('change', () => {
         if (fileInput.files && fileInput.files.length > 0) {
-            handleFileUpload(fileInput.files[0]);
+            const selectedFile = fileInput.files[0];
+            fileInput.value = '';
+            handleFileUpload(selectedFile);
         }
     });
 
@@ -477,12 +480,14 @@ function initApp() {
 
         try {
             let info = await inspectFileOffline(file, signal);
+            if (signal.aborted) return;
 
             // Only if binary .ppt (97-2003) AND local Python server is running on localhost, enrich via /api/analyze
             if (info.is_legacy_ppt && (await probeSameOriginLocalPython())) {
+                if (signal.aborted) return;
                 const formData = new FormData();
                 formData.append('file', file);
-                const resp = await fetch('./api/analyze', {
+                const resp = await fetch('/api/analyze', {
                     method: 'POST',
                     body: formData,
                     signal,
@@ -492,16 +497,19 @@ function initApp() {
                     info = apiData;
                 }
             }
+            if (signal.aborted) return;
 
             currentRawFile = file;
             currentFileInfo = info;
             populateConfigPanel(info);
         } catch (err) {
-            if (err && err.name === 'AbortError') return;
+            if ((err && err.name === 'AbortError') || signal.aborted) return;
             showError(err.message || 'Không thể phân tích cấu trúc tệp.');
         } finally {
             analyzeLoading.classList.add('hidden');
-            activeAbortController = null;
+            if (activeAbortController && activeAbortController.signal === signal) {
+                activeAbortController = null;
+            }
         }
     }
 
@@ -681,7 +689,7 @@ function initApp() {
 
         try {
             if (isLegacyPpt && localPythonBackendAvailable && currentFileInfo.file_id) {
-                const resp = await fetch('./api/compress', {
+                const resp = await fetch('/api/compress', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -696,6 +704,7 @@ function initApp() {
                 if (!resp.ok) {
                     throw new Error(data.detail || 'Không thể bắt đầu nén tệp .ppt.');
                 }
+                if (signal.aborted) return;
                 pollLocalJobStatus(data.job_id, 'compress');
                 return;
             }
@@ -724,16 +733,19 @@ function initApp() {
                     signal
                 );
             }
+            if (signal.aborted) return;
 
             activeAbortController = null;
             reenableActionButtons();
             await recordJobInHistory(result, 'compress');
             renderResultDashboard(result);
         } catch (err) {
-            activeAbortController = null;
+            if (activeAbortController && activeAbortController.signal === signal) {
+                activeAbortController = null;
+            }
             reenableActionButtons();
             progressSection.classList.add('hidden');
-            if (err && err.name === 'AbortError') return;
+            if ((err && err.name === 'AbortError') || signal.aborted) return;
             showError(err.message || 'Quá trình nén tệp gặp sự cố.');
         }
     });
@@ -787,6 +799,7 @@ function initApp() {
                 if (!resp.ok) {
                     throw new Error(data.detail || 'Không thể giải nén tệp .ppt.');
                 }
+                if (signal.aborted) return;
                 pollLocalJobStatus(data.job_id, 'extract');
                 return;
             }
@@ -797,16 +810,19 @@ function initApp() {
                 (cur, tot, msg) => updateProgressUi(cur, tot, msg, 'mục'),
                 signal
             );
+            if (signal.aborted) return;
 
             activeAbortController = null;
             reenableActionButtons();
             await recordJobInHistory(result, 'extract');
             renderResultDashboard(result);
         } catch (err) {
-            activeAbortController = null;
+            if (activeAbortController && activeAbortController.signal === signal) {
+                activeAbortController = null;
+            }
             reenableActionButtons();
             progressSection.classList.add('hidden');
-            if (err && err.name === 'AbortError') return;
+            if ((err && err.name === 'AbortError') || signal.aborted) return;
             showError(err.message || 'Quá trình giải nén tài nguyên gặp sự cố.');
         }
     });
@@ -816,7 +832,7 @@ function initApp() {
 
         pollTimer = setInterval(async () => {
             try {
-                const res = await fetch(`./api/job/${encodeURIComponent(jobId)}`);
+                const res = await fetch(`/api/job/${encodeURIComponent(jobId)}`);
                 const job = await res.json();
                 if (!res.ok) {
                     throw new Error(job.detail || 'Không thể lấy trạng thái tiến trình.');
@@ -916,7 +932,7 @@ function initApp() {
         } else if (res.download_url) {
             downloadFileBtn.href = res.download_url;
         } else if (job.job_id) {
-            downloadFileBtn.href = `./api/download/${encodeURIComponent(job.job_id)}`;
+            downloadFileBtn.href = `/api/download/${encodeURIComponent(job.job_id)}`;
         }
 
         if (res.output_filename) {
@@ -1179,7 +1195,12 @@ function initApp() {
     }
 
     async function refreshHistoryBadgeAndList() {
-        const items = await listHistoryEntries();
+        let items = [];
+        try {
+            items = await listHistoryEntries();
+        } catch (_err) {
+            items = [];
+        }
         if (historyCountBadge) {
             historyCountBadge.textContent = String(items.length);
         }
@@ -1202,7 +1223,11 @@ function initApp() {
         openHistoryBtn.addEventListener('click', async () => {
             hideHistoryFeedback();
             confirmClearBar.classList.add('hidden');
-            await refreshHistoryBadgeAndList();
+            try {
+                await refreshHistoryBadgeAndList();
+            } catch (_err) {
+                // Still open modal even if IndexedDB is blocked
+            }
             historyModal.classList.remove('hidden');
         });
     }
@@ -1303,10 +1328,14 @@ function initApp() {
     // -----------------------------------------------------------------------
 
     (async () => {
-        await requestPersistentStorage();
-        const prefs = await loadPreferences();
-        applyPreferencesToControls(prefs);
-        await refreshHistoryBadgeAndList();
+        try {
+            await requestPersistentStorage();
+            const prefs = await loadPreferences();
+            applyPreferencesToControls(prefs);
+            await refreshHistoryBadgeAndList();
+        } catch (_err) {
+            // Gracefully continue with default preferences if storage is blocked
+        }
     })();
 
     if ('serviceWorker' in navigator) {
