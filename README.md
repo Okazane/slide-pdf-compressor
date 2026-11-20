@@ -1,55 +1,77 @@
-# Slide & PDF Smart Compressor
+# Slide & PDF Smart Compressor (100% Offline Static PWA + Optional Hardened Python Engine)
 
-Ứng dụng Web thông minh giúp **nén dung lượng** và **giải nén / trích xuất tài nguyên (`.ZIP`)** cho các tệp thuyết trình (**PDF**, **PowerPoint `.pptx` / `.ppt`**) có nhiều hình ảnh lớn (Canva, Slide thiết kế, báo cáo học thuật) về dưới ngưỡng **Dung lượng mục tiêu (Target MB - VD: < 5 MB, < 10 MB)** mà vẫn bảo toàn độ sắc nét tối đa.
+Ứng dụng Web PWA thông minh giúp **nén dung lượng theo mức mục tiêu (Target MB)** và **giải nén / trích xuất tài nguyên (`.ZIP`)** cho các tệp thuyết trình (**PDF**, **PowerPoint `.pptx`**) **100% cục bộ ngay trên trình duyệt Offline** — không cần máy chủ backend, không tải tệp nhạy cảm lên đám mây, triển khai trực tiếp lên **Vercel Static Hosting** (`outputDirectory: "static"`).
 
-## Tính năng nổi bật
+Dự án đồng thời đi kèm máy chủ **FastAPI Python cục bộ tùy chọn (`app.py`)** đã được gia cố bảo mật toàn diện (chống Path/Glob Injection, ZIP/XML/Image Bomb, giới hạn hàng đợi Worker Pool và làm sạch thông báo lỗi), hỗ trợ thêm định dạng `.ppt` nhị phân cũ (PowerPoint 97–2003) qua COM cô lập trên Windows.
 
-### 1. Nén Thông Minh theo Dung lượng mục tiêu (`Auto-Target MB`)
-- **Tự động cân chỉnh thông số tối ưu**: Nhập giới hạn dung lượng mong muốn (ví dụ `10 MB`), thuật toán tự động lấy mẫu và tìm kiếm cặp `(scale, jpeg_quality)` tốt nhất kèm **chốt chặn chống phình dung lượng (non-inflation guard)** và cảnh báo rõ ràng nếu tệp đã chạm ngưỡng nén an toàn (`target_met`).
-- **2 Chế độ nén PDF chuyên biệt**:
-  1. **Gộp phẳng trang (`flatten`)**: Giải quyết triệt để các tệp PDF xuất từ Canva có hàng trăm lớp ảnh PNG trong suốt chồng lớp (giảm tới 90–96% dung lượng), giữ nguyên chính xác kích thước vật lý `(width_pt, height_pt)` từng trang với cơ chế đệm byte tiết kiệm RAM.
-  2. **Giữ nguyên chữ Vector (`vector`)**: Chỉ tối ưu các ảnh nhúng (`XObject`) khi thực sự giảm được dung lượng, giữ nguyên 100% lớp chữ vector tiếng Việt để bôi đen, sao chép và tìm kiếm.
-- **Xử lý thông minh PowerPoint (`.pptx` vs `.ppt` cũ)**:
-  1. **Nén trực tiếp `.pptx` → `.pptx` nhẹ**: Tối ưu hóa đa định dạng ảnh trong `ppt/media/*` (`.jpg`, `.png`, `.webp`, `.bmp`, `.tiff`, `.gif`), tự động chuyển ảnh PNG/BMP/TIFF không trong suốt kích thước lớn sang JPEG kèm cập nhật liên kết XML `.rels`, truyền dữ liệu ZIP theo luồng (streaming) tiết kiệm RAM.
-  2. **Chuyển đổi `.pptx` / `.ppt` → `.pdf` nhẹ**: Xuất PDF chuẩn qua tiến trình Microsoft PowerPoint COM cô lập có timeout an toàn (tự động dọn tiến trình ẩn, không rò rỉ `POWERPNT.EXE`, kèm cơ chế dự phòng dựng slide thuần Python hỗ trợ font tiếng Việt cho `.pptx`).
-  3. **Nhận diện riêng định dạng `.ppt` nhị phân cũ**: Tự động khóa tùy chọn nén trực tiếp sang `.pptx` hoặc trích xuất ảnh nhúng trực tiếp, hướng dẫn chuyển sang xuất PDF nhẹ hoặc tách bộ ảnh slide.
+---
 
-### 2. Giải Nén / Trích Xuất Tài Nguyên (`.ZIP`)
-- **Trích xuất toàn bộ ảnh gốc nhúng trong tệp (`images`)**: Tách nguyên bản toàn bộ ảnh độ phân giải gốc bên trong `.pptx` (`ppt/media/*`) hoặc `.pdf` (`XObject images`), tự động khử trùng lặp bằng mã băm SHA-256 và đóng gói thành tệp `.zip`.
-- **Tách từng trang / slide thành bộ ảnh HD (`slides`)**: Kết xuất từng trang PDF hoặc từng slide thuyết trình (`.pptx` / `.ppt`) thành bộ ảnh `.jpg` chuẩn Full HD (~1920px) đóng gói gọn trong `.zip`.
+## Điểm nổi bật của Phiên bản 2.0 (Offline-First Static PWA)
 
-### 3. Kiến trúc Backend & Giao diện Web hiện đại
-- **Streaming Upload & Dọn dẹp tự động (TTL Cleanup)**: Tải tệp theo từng khối `1 MB` (hỗ trợ tối đa `500 MB`, trả mã HTTP `413` nếu vượt ngưỡng) và tự động dọn các tệp tạm quá hạn 2 giờ trên máy chủ.
-- **Giao diện 2 Tab trực quan**: Chuyển đổi mượt mà giữa **🗜️ Nén Thông Minh** và **📦 Giải Nén / Trích Xuất (.ZIP)**, theo dõi tiến độ thời gian thực và so sánh chất lượng Trước / Sau ngay trên trình duyệt.
+### 1. Xử lý 100% Cục bộ trên Trình duyệt Offline (`static/offline-engine.js`)
+- **Không phụ thuộc CDN hay Internet**: Toàn bộ thư viện lõi (`pdf.js`, `pdf-lib`, `JSZip`, `Dexie.js`), bộ font tiếng Việt `Be Vietnam Pro` (`.woff2` đầy đủ dải Unicode tiếng Việt, trọng lượng 400–800) và bộ icon PWA (`192x192`, `512x512`, `favicon.svg`) được đóng gói hoàn toàn cục bộ trong `static/`.
+- **Service Worker thông minh (`static/sw.js`)**: Precache toàn bộ giao diện, font chữ và thư viện xử lý; áp dụng chiến lược **Network-First** (sao lưu đồng bộ `res.clone()`) cho HTML và **Cache-First / Stale-While-Revalidate** kèm `Response.error()` an toàn cho tài nguyên tĩnh.
+- **Nén PDF theo Dung lượng mục tiêu (`flatten` & `vector`)**:
+  - `flatten`: Lấy mẫu 4 trang tìm cặp `(scale, quality)` tối ưu `<= targetMb * 0.90`, dựng từng trang một qua Canvas tiết kiệm RAM, giữ nguyên kích thước vật lý `(w_pt, h_pt)` từng trang bằng `pdf-lib`, tự động hạ bậc lặp nếu vượt ngưỡng và có **chốt chặn chống phình dung lượng (non-inflation guard)**.
+  - `vector`: Tái đóng gói luồng đối tượng PDF và nén chọn lọc ảnh nhúng khi giảm được dung lượng mà vẫn giữ nguyên 100% lớp chữ Vector tiếng Việt để bôi đen, sao chép và tìm kiếm.
+- **Nén trực tiếp `.PPTX` & Chuyển đổi `.PPTX → .PDF` Offline**:
+  - Tối ưu ảnh trong `ppt/media/*` theo cấu hình thích ứng, tự động chuyển ảnh PNG/BMP không trong suốt kích thước lớn sang JPEG kèm cập nhật an toàn `*.rels` & `[Content_Types].xml` qua `DOMParser` (kiểm tra `parsererror` và chặn `<!DOCTYPE` / `<!ENTITY`).
+  - Dựng slide `.pptx → .pdf` ngay trên trình duyệt (`p:sldSz`, nền slide, ảnh định vị `p:pic` và khung văn bản `a:t` tiếng Việt).
+- **Trích xuất gói `.ZIP` (`images` & `slides`)**:
+  - Khử trùng lặp ảnh nhúng bằng mã băm **SHA-256** hoặc kết xuất từng trang/slide thành bộ ảnh `.JPG` chuẩn **Full HD (1920px)**.
+- **Giới hạn an toàn & Huỷ tác vụ (`AbortController`)**: Kiểm tra tệp `<= 500 MB`, chống ZIP bomb (`<= 5.000` mục, tổng giải nén `<= 1.5 GB`), giới hạn điểm ảnh Canvas `<= 64 MP` và hỗ trợ nút **Huỷ tác vụ** tức thì.
+
+### 2. Cơ sở dữ liệu Cục bộ trên Thiết bị (`static/db.js` — Dexie.js IndexedDB)
+- Lưu trữ bền vững ngay trên trình duyệt (`navigator.storage.persist()`):
+  - `preferences`: Ghi nhớ giao diện Sáng/Tối (`theme`), mức dung lượng mục tiêu (`targetMb`), chế độ nén (`mode`) và định dạng xuất (`outputFormat`).
+  - `history`: Lưu tối đa **30 bản ghi** nén/giải nén gần nhất kèm ảnh thu nhỏ xem trước.
+- **Sao lưu & Khôi phục dữ liệu (`.json`)**:
+  - Hộp thoại **🗂️ Lịch sử & Dữ liệu Offline** cho phép **Xuất dữ liệu (`.json`)**, **Nhập dữ liệu (`.json`)** và **Xoá dữ liệu máy**.
+  - Bộ kiểm tra lược đồ nghiêm ngặt (`<= 5 MB`, chặn tuyệt đối `__proto__` / `constructor` / `prototype`, kiểm tra biên số học, lọc ký tự điều khiển và chỉ chấp nhận ảnh xem trước chuẩn nhị phân JPEG `data:image/jpeg;base64,` — chống hoàn toàn SVG/Script XSS).
+
+### 3. Triển khai Tĩnh lên Vercel (Zero Backend)
+Tệp `vercel.json` đã được cấu hình sẵn `"buildCommand": ""`, `"outputDirectory": "static"` cùng bộ HTTP Security Headers chặt chẽ (`Content-Security-Policy` cấm toàn bộ inline script, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, và `Cache-Control: no-cache` cho `/sw.js`). Chỉ cần kết nối kho mã nguồn với Vercel là ứng dụng hoạt động 100% độc lập.
+
+---
 
 ## Cấu trúc dự án
 
 ```text
 slide-pdf-compressor/
-├── app.py                    # FastAPI server (/api/analyze, /api/compress, /api/extract, /api/job, /api/download)
-├── core/
-│   ├── pdf_compressor.py     # Engine phân tích & nén PDF (flatten / vector)
-│   ├── pptx_compressor.py    # Engine phân tích, nén trực tiếp PPTX & chuyển đổi PPTX/PPT -> PDF
-│   └── extractor.py          # Engine giải nén ảnh gốc & tách trang/slide thành gói .ZIP
-├── static/
-│   ├── index.html            # Giao diện người dùng 2 chế độ (Nén & Giải nén .ZIP)
-│   ├── app.js                # Logic tương tác API, cập nhật tiến độ & bảng kết quả
-│   └── style.css             # Giao diện Glassmorphism hỗ trợ chế độ Sáng / Tối
+├── vercel.json               # Cấu hình triển khai Static PWA trực tiếp lên Vercel + CSP Headers
+├── static/                   # 100% Standalone Offline-First Static PWA Root
+│   ├── index.html            # Giao diện chính (đường dẫn tương đối sạch, không inline script)
+│   ├── manifest.json         # Web App Manifest chuẩn cài đặt PWA
+│   ├── sw.js                 # Service Worker hỗ trợ hoạt động Offline 100%
+│   ├── fonts.css             # Khai báo @font-face Be Vietnam Pro tự lưu trữ (.woff2)
+│   ├── style.css             # Giao diện Glassmorphism Sáng / Tối
+│   ├── db.js                 # Cơ sở dữ liệu IndexedDB (Dexie.js) & trình kiểm duyệt sao lưu .json
+│   ├── offline-engine.js     # Engine nén & giải nén PDF / PPTX thuần trình duyệt
+│   ├── app.js                # Điều phối UI, AbortController, Lịch sử Offline & fallback .PPT cục bộ
+│   ├── fonts/                # Font Be Vietnam Pro (Latin, Latin-Ext, Vietnamese .woff2)
+│   ├── icons/                # Icon PWA (icon-192.png, icon-512.png) & favicon.svg
+│   └── vendor/               # Thư viện cục bộ: dexie, jszip, pdf-lib, pdf.js + standard_fonts
+├── app.py                    # Máy chủ FastAPI cục bộ tùy chọn (đã gia cố 4 lớp bảo mật)
+├── core/                     # Engine Python cục bộ tùy chọn (hỗ trợ thêm .ppt 97-2003 qua COM)
 └── tests/
-    └── test_compressors.py   # Bộ kiểm thử tự động toàn diện (pytest)
+    ├── test_compressors.py   # Bộ kiểm thử pytest (nén, trích xuất & kiểm thử bảo mật backend)
+    └── verify_offline_pwa.mjs# Bộ kiểm thử Node xác thực Offline PWA, CSP & JSON validator
 ```
 
-## Cài đặt & Khởi chạy
+---
+
+## Chạy Máy chủ Python Cục bộ Tùy chọn (Hỗ trợ `.ppt` 97–2003)
 
 ```bash
 pip install -r requirements.txt
 python -m uvicorn app:app --host 127.0.0.1 --port 8080
 ```
 
-Hoặc trên Windows, nhấp đúp vào tệp `run.bat` để tự động khởi chạy và mở trình duyệt tại `http://127.0.0.1:8080`.
+Hoặc trên Windows, nhấp đúp `run.bat` để khởi chạy tại `http://127.0.0.1:8080`. Có thể tùy biến danh sách CORS qua biến môi trường `ALLOWED_ORIGINS`.
 
-## Kiểm thử (Tests)
+## Kiểm thử Tự động (Pytest + Node Verification)
 
 ```bash
 python -m pytest tests/test_compressors.py -v
+node tests/verify_offline_pwa.mjs
 ```

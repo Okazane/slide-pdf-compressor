@@ -21,6 +21,78 @@ from .pdf_compressor import (
     compress_pdf,
 )
 
+Image.MAX_IMAGE_PIXELS = 64_000_000
+
+MAX_ZIP_ENTRIES = 5000
+MAX_ZIP_UNCOMPRESSED_BYTES = 1_500_000_000
+MAX_SINGLE_XML_BYTES = 50 * 1024 * 1024
+
+
+def _validate_xml_no_dtd(raw_xml: bytes) -> None:
+    """Reject XML payloads containing <!DOCTYPE or <!ENTITY to prevent XXE / XML Entity Expansion."""
+    if not raw_xml:
+        return
+    upper_ascii = raw_xml.upper()
+    if b"<!DOCTYPE" in upper_ascii or b"<!ENTITY" in upper_ascii:
+        raise ValueError(
+            "Tệp chứa khai báo XML không an toàn (<!DOCTYPE / <!ENTITY), từ chối xử lý."
+        )
+    if raw_xml[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in raw_xml[:64]:
+        for enc in ("utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                decoded_upper = raw_xml.decode(enc, errors="ignore").upper()
+                if "<!DOCTYPE" in decoded_upper or "<!ENTITY" in decoded_upper:
+                    raise ValueError(
+                        "Tệp chứa khai báo XML không an toàn (<!DOCTYPE / <!ENTITY), từ chối xử lý."
+                    )
+            except ValueError:
+                raise
+            except Exception:
+                continue
+
+
+def _safe_et_fromstring(raw_xml: bytes) -> ET.Element:
+    """Safely parse XML bytes after rejecting any DTD / ENTITY declarations."""
+    _validate_xml_no_dtd(raw_xml)
+    return ET.fromstring(raw_xml)
+
+
+def _validate_zip_safety(zin: zipfile.ZipFile) -> None:
+    """
+    Validate ZIP archive against ZIP bombs (entry count, total uncompressed size),
+    Zip-Slip path traversal entries, and XML entity bombs inside OPC XML/.rels parts.
+    """
+    infos = zin.infolist()
+    if len(infos) > MAX_ZIP_ENTRIES:
+        raise ValueError(
+            f"Tệp nén chứa quá nhiều mục ({len(infos)} > {MAX_ZIP_ENTRIES}), từ chối xử lý để chống ZIP bomb."
+        )
+
+    total_uncompressed = 0
+    for info in infos:
+        fname = info.filename or ""
+        if "\x00" in fname or fname.startswith(("/", "\\")) or "\\" in fname:
+            raise ValueError("Phát hiện đường dẫn tệp không hợp lệ bên trong gói ZIP/PPTX.")
+        parts = fname.split("/")
+        if any(p == ".." for p in parts) or (parts and ":" in parts[0]):
+            raise ValueError("Phát hiện đường dẫn leo thang (path traversal) bên trong gói ZIP/PPTX.")
+
+        file_sz = int(getattr(info, "file_size", 0) or 0)
+        if file_sz < 0:
+            raise ValueError("Kích thước mục giải nén không hợp lệ trong gói ZIP/PPTX.")
+        total_uncompressed += file_sz
+        if total_uncompressed > MAX_ZIP_UNCOMPRESSED_BYTES:
+            raise ValueError(
+                "Tổng dung lượng giải nén vượt quá giới hạn an toàn (1.5 GB), từ chối xử lý để chống ZIP bomb."
+            )
+
+        lower_name = fname.lower()
+        if not info.is_dir() and (lower_name.endswith(".xml") or lower_name.endswith(".rels")):
+            if file_sz > MAX_SINGLE_XML_BYTES:
+                raise ValueError("Tệp cấu hình XML bên trong slide vượt ngưỡng an toàn (50 MB).")
+            raw_xml = zin.read(fname)
+            _validate_xml_no_dtd(raw_xml)
+
 IMAGE_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -116,33 +188,34 @@ def inspect_pptx(pptx_path: str) -> dict:
     preview_base64 = None
 
     if is_zip:
+        with zipfile.ZipFile(str(path_obj), "r") as zf:
+            _validate_zip_safety(zf)
+            names = zf.namelist()
+            media_count = sum(
+                1
+                for n in names
+                if n.startswith("ppt/media/") and not n.endswith("/")
+            )
+
         try:
             prs = Presentation(str(path_obj))
             slide_count = len(prs.slides)
         except Exception:
             pass
 
-        try:
-            with zipfile.ZipFile(str(path_obj), "r") as zf:
-                names = zf.namelist()
-                if slide_count == 0:
-                    slide_count = sum(
-                        1
-                        for n in names
-                        if n.startswith("ppt/slides/slide") and n.endswith(".xml")
-                    )
-                media_count = sum(
-                    1
-                    for n in names
-                    if n.startswith("ppt/media/") and not n.endswith("/")
-                )
-        except Exception:
-            pass
+        if slide_count == 0:
+            slide_count = sum(
+                1
+                for n in names
+                if n.startswith("ppt/slides/slide") and n.endswith(".xml")
+            )
 
         try:
             slides_imgs = _render_pptx_slides_pil(str(path_obj), max_slides=1, width=960)
             if slides_imgs:
                 preview_base64 = _pil_to_base64_jpeg(slides_imgs[0], quality=80)
+        except Image.DecompressionBombError:
+            raise ValueError("Phát hiện ảnh nhúng vượt ngưỡng an toàn 64 MP.")
         except Exception:
             preview_base64 = None
 
@@ -209,6 +282,8 @@ def _optimize_media_entry(
         if getattr(im, "is_animated", False) and getattr(im, "n_frames", 1) > 1:
             return data, ext_lower
         im.load()
+    except Image.DecompressionBombError:
+        raise ValueError("Phát hiện ảnh nhúng vượt ngưỡng an toàn 64 MP.")
     except Exception:
         return data, ext_lower
 
@@ -356,11 +431,14 @@ def _find_hardcoded_media_basenames(zin: zipfile.ZipFile, media_basenames: set[s
 def _rewrite_rels_xml(
     raw_xml: bytes, rels_zip_path: str, rename_map: dict[str, str]
 ) -> bytes:
+    _validate_xml_no_dtd(raw_xml)
     if not rename_map:
         return raw_xml
 
     try:
-        root = ET.fromstring(raw_xml)
+        root = _safe_et_fromstring(raw_xml)
+    except ValueError:
+        raise
     except Exception:
         return raw_xml
 
@@ -413,11 +491,14 @@ def _rewrite_rels_xml(
 
 
 def _rewrite_content_types_xml(raw_xml: bytes, rename_map: dict[str, str]) -> bytes:
+    _validate_xml_no_dtd(raw_xml)
     if not rename_map:
         return raw_xml
 
     try:
-        root = ET.fromstring(raw_xml)
+        root = _safe_et_fromstring(raw_xml)
+    except ValueError:
+        raise
     except Exception:
         return raw_xml
 
@@ -470,7 +551,7 @@ def compress_pptx_direct(
     """
     Compress a .pptx file directly by optimizing embedded media images
     (including smart opaque PNG/BMP/TIFF -> JPEG conversion with XML relationship updates)
-    and streaming non-image entries with low RAM usage.
+    and streaming entries directly into temp_zip_path per pass without buffering all media in RAM.
     """
     in_path = Path(input_path)
     if not in_path.exists():
@@ -522,6 +603,7 @@ def compress_pptx_direct(
 
     try:
         with zipfile.ZipFile(str(in_path), "r") as zin:
+            _validate_zip_safety(zin)
             all_infos = zin.infolist()
             media_infos = [
                 info
@@ -530,6 +612,7 @@ def compress_pptx_direct(
                 and not info.is_dir()
                 and Path(info.filename).suffix.lower() in IMAGE_EXTENSIONS
             ]
+            media_filenames = {info.filename for info in media_infos}
             total_media = max(len(media_infos), 1)
             candidate_basenames = {
                 Path(info.filename).name
@@ -543,50 +626,10 @@ def compress_pptx_direct(
 
             compressed_size_bytes = original_size_bytes
 
-            for pass_idx, (max_dim, jpg_q, png_colors) in enumerate(profiles):
+            for _pass_idx, (max_dim, jpg_q, png_colors) in enumerate(profiles):
                 used_names_lower = set(base_names_lower)
                 rename_map: dict[str, str] = {}
-                optimized_media: dict[str, tuple[str, bytes]] = {}
-
-                for m_idx, m_info in enumerate(media_infos):
-                    orig_fname = posixpath.normpath(m_info.filename)
-                    orig_ext = Path(orig_fname).suffix.lower()
-                    bname = Path(orig_fname).name
-                    raw_bytes = zin.read(m_info.filename)
-
-                    can_rename = bname not in hardcoded_basenames
-                    opt_bytes, final_ext = _optimize_media_entry(
-                        raw_bytes,
-                        ext=orig_ext,
-                        max_dim=max_dim,
-                        jpeg_quality=jpg_q,
-                        png_colors=png_colors,
-                        allow_jpeg_rename=can_rename,
-                    )
-
-                    if final_ext != orig_ext and final_ext == ".jpg":
-                        used_names_lower.discard(orig_fname.lower())
-                        parent_dir = posixpath.dirname(orig_fname)
-                        stem = Path(orig_fname).stem
-                        cand_name = f"{parent_dir}/{stem}.jpg"
-                        suffix_idx = 1
-                        while cand_name.lower() in used_names_lower:
-                            cand_name = f"{parent_dir}/{stem}_{suffix_idx}.jpg"
-                            suffix_idx += 1
-                        used_names_lower.add(cand_name.lower())
-                        rename_map[orig_fname] = cand_name
-                        target_fname = cand_name
-                    else:
-                        target_fname = m_info.filename
-
-                    optimized_media[m_info.filename] = (target_fname, opt_bytes)
-
-                    _notify_progress(
-                        progress_callback,
-                        m_idx + 1,
-                        total_media,
-                        f"Đang nén tài nguyên ảnh {m_idx + 1}/{len(media_infos)}...",
-                    )
+                deferred_xml_infos: list[zipfile.ZipInfo] = []
 
                 with zipfile.ZipFile(
                     str(temp_zip_path),
@@ -594,30 +637,73 @@ def compress_pptx_direct(
                     compression=zipfile.ZIP_DEFLATED,
                     compresslevel=9,
                 ) as zout:
+                    # 1. Stream-optimize and write media entries one at a time directly to zout
+                    for m_idx, m_info in enumerate(media_infos):
+                        orig_fname = posixpath.normpath(m_info.filename)
+                        orig_ext = Path(orig_fname).suffix.lower()
+                        bname = Path(orig_fname).name
+                        raw_bytes = zin.read(m_info.filename)
+
+                        can_rename = bname not in hardcoded_basenames
+                        opt_bytes, final_ext = _optimize_media_entry(
+                            raw_bytes,
+                            ext=orig_ext,
+                            max_dim=max_dim,
+                            jpeg_quality=jpg_q,
+                            png_colors=png_colors,
+                            allow_jpeg_rename=can_rename,
+                        )
+                        del raw_bytes
+
+                        if final_ext != orig_ext and final_ext == ".jpg":
+                            used_names_lower.discard(orig_fname.lower())
+                            parent_dir = posixpath.dirname(orig_fname)
+                            stem = Path(orig_fname).stem
+                            cand_name = f"{parent_dir}/{stem}.jpg"
+                            suffix_idx = 1
+                            while cand_name.lower() in used_names_lower:
+                                cand_name = f"{parent_dir}/{stem}_{suffix_idx}.jpg"
+                                suffix_idx += 1
+                            used_names_lower.add(cand_name.lower())
+                            rename_map[orig_fname] = cand_name
+                            target_fname = cand_name
+                        else:
+                            target_fname = m_info.filename
+
+                        zinfo = _make_zip_info(target_fname, m_info.date_time)
+                        zout.writestr(zinfo, opt_bytes)
+                        del opt_bytes
+
+                        _notify_progress(
+                            progress_callback,
+                            m_idx + 1,
+                            total_media,
+                            f"Đang nén tài nguyên ảnh {m_idx + 1}/{len(media_infos)}...",
+                        )
+
+                    # 2. Stream non-media entries and rewrite [Content_Types].xml / *.rels using rename_map
                     for info in all_infos:
-                        if info.is_dir():
+                        if info.is_dir() or info.filename in media_filenames:
                             continue
                         fname = info.filename
-                        if fname in optimized_media:
-                            target_fname, opt_bytes = optimized_media[fname]
-                            zinfo = _make_zip_info(target_fname, info.date_time)
-                            zout.writestr(zinfo, opt_bytes)
-                        elif fname == "[Content_Types].xml" and rename_map:
-                            raw_ct = zin.read(fname)
-                            new_ct = _rewrite_content_types_xml(raw_ct, rename_map)
-                            zinfo = _make_zip_info(fname, info.date_time)
-                            zout.writestr(zinfo, new_ct)
-                        elif fname.lower().endswith(".rels") and rename_map:
-                            raw_rels = zin.read(fname)
-                            new_rels = _rewrite_rels_xml(
-                                raw_rels, posixpath.normpath(fname), rename_map
-                            )
-                            zinfo = _make_zip_info(fname, info.date_time)
-                            zout.writestr(zinfo, new_rels)
+                        if fname == "[Content_Types].xml" or fname.lower().endswith(".rels"):
+                            deferred_xml_infos.append(info)
                         else:
                             zinfo = _make_zip_info(fname, info.date_time)
                             with zin.open(info, "r") as src, zout.open(zinfo, "w") as dst:
                                 shutil.copyfileobj(src, dst, length=262144)
+
+                    for info in deferred_xml_infos:
+                        fname = info.filename
+                        raw_xml = zin.read(fname)
+                        if fname == "[Content_Types].xml":
+                            new_xml = _rewrite_content_types_xml(raw_xml, rename_map)
+                        else:
+                            new_xml = _rewrite_rels_xml(
+                                raw_xml, posixpath.normpath(fname), rename_map
+                            )
+                        zinfo = _make_zip_info(fname, info.date_time)
+                        zout.writestr(zinfo, new_xml)
 
                 compressed_size_bytes = temp_zip_path.stat().st_size
                 if compressed_size_bytes <= target_bytes:
@@ -1216,6 +1302,9 @@ def convert_pptx_to_compressed_pdf(
     is_zip = zipfile.is_zipfile(str(in_path))
     if ext_in == ".pptx" and not is_zip:
         raise ValueError("Tệp .pptx bị hỏng hoặc không đúng cấu trúc ZIP.")
+    if is_zip:
+        with zipfile.ZipFile(str(in_path), "r") as zf:
+            _validate_zip_safety(zf)
 
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Slide &amp; PDF Smart Compressor - Nén &amp; Trích Xuất PDF / PowerPoint Thông Minh</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="description" content="Nén PDF &amp; PowerPoint (.PPTX) theo dung lượng mục tiêu và giải nén ảnh / Slide (.ZIP) 100% Offline ngay trên trình duyệt.">
+    <title>Slide &amp; PDF Smart Compressor - Nén &amp; Trích Xuất PDF / PowerPoint 100% Offline</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="fonts.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="bg-orb orb-1"></div>
@@ -27,11 +30,19 @@
                     </svg>
                 </div>
                 <div class="brand-text">
-                    <h1>Slide &amp; PDF Smart Compressor</h1>
-                    <p>Nén PDF / PowerPoint theo dung lượng mục tiêu &amp; Giải nén tài nguyên ảnh / Slide (.ZIP)</p>
+                    <div class="brand-title-row">
+                        <h1>Slide &amp; PDF Smart Compressor</h1>
+                        <span id="offlineStatusPill" class="offline-pill">⚡ 100% Offline • Bảo mật trên trình duyệt</span>
+                    </div>
+                    <p>Nén PDF / PowerPoint theo dung lượng mục tiêu &amp; Giải nén tài nguyên ảnh / Slide (.ZIP) không cần máy chủ</p>
                 </div>
             </div>
             <div class="header-actions">
+                <button id="openHistoryBtn" class="icon-btn" type="button" title="Xem lịch sử &amp; Sao lưu dữ liệu trên thiết bị">
+                    <span>🗂️</span>
+                    <span>Lịch sử &amp; Dữ liệu Offline</span>
+                    <span id="historyCountBadge" class="count-pill">0</span>
+                </button>
                 <button id="themeToggleBtn" class="icon-btn" type="button" title="Chuyển chế độ Sáng / Tối">
                     <span id="themeIcon">☀️</span>
                     <span id="themeLabel">Giao diện Sáng</span>
@@ -43,7 +54,7 @@
         <main class="main-content">
             <!-- Step 1: Upload Zone -->
             <section id="uploadSection" class="glass-panel section-card">
-                <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Tải tệp PDF hoặc PowerPoint lên">
+                <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Chọn tệp PDF hoặc PowerPoint để xử lý cục bộ trên trình duyệt">
                     <input type="file" id="fileInput" accept=".pdf,.pptx,.ppt" hidden>
                     <div class="drop-icon-wrap">
                         <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -53,7 +64,7 @@
                         </svg>
                     </div>
                     <h2>Kéo &amp; thả tệp vào đây hoặc nhấn để chọn tệp</h2>
-                    <p class="drop-subtitle">Hỗ trợ bài thuyết trình Canva, Slide thuyết trình lớn &amp; Tài liệu học thuật (tối đa 500 MB)</p>
+                    <p class="drop-subtitle">Xử lý 100% cục bộ trên trình duyệt (Không tải tệp lên đám mây • Hỗ trợ tối đa 500 MB)</p>
                     <div class="supported-badges">
                         <span class="format-badge pdf-badge">.PDF</span>
                         <span class="format-badge pptx-badge">.PPTX</span>
@@ -62,7 +73,8 @@
                 </div>
                 <div id="analyzeLoading" class="analyze-loading hidden">
                     <div class="spinner"></div>
-                    <span id="analyzeStatusText">Đang phân tích cấu trúc tệp và trích xuất trang mẫu...</span>
+                    <span id="analyzeStatusText">Đang phân tích cấu trúc tệp ngay trên trình duyệt...</span>
+                    <button id="cancelAnalyzeBtn" type="button" class="cancel-btn-sm">Huỷ</button>
                 </div>
             </section>
 
@@ -141,7 +153,7 @@
                             </label>
                         </div>
                         <p id="pptLegacyCompressHint" class="legacy-hint hidden">
-                            ℹ️ Định dạng <strong>.PPT cũ</strong> không hỗ trợ nén trực tiếp sang .PPTX — hệ thống tự động chọn chuyển đổi và nén sang <strong>.PDF nhẹ</strong>.
+                            ℹ️ Định dạng <strong>.PPT nhị phân cũ (97–2003)</strong> cần lưu sang <strong>.PPTX</strong> hoặc <strong>.PDF</strong> để nén trực tiếp 100% Offline trên trình duyệt.
                         </p>
                     </div>
 
@@ -199,7 +211,7 @@
                                 <input type="radio" name="extract_mode" value="images" checked>
                                 <div class="radio-card-body">
                                     <div class="radio-title">Trích xuất toàn bộ ảnh gốc nhúng trong tệp</div>
-                                    <div class="radio-desc">Tách nguyên bản các ảnh gốc độ phân giải cao trong PDF / PPTX (tự động khử trùng lặp) thành gói .ZIP</div>
+                                    <div class="radio-desc">Tách nguyên bản các ảnh gốc độ phân giải cao trong PDF / PPTX (tự động khử trùng lặp SHA-256) thành gói .ZIP</div>
                                 </div>
                             </label>
                             <label class="radio-card" data-extract="slides" id="extractSlidesCard">
@@ -211,7 +223,7 @@
                             </label>
                         </div>
                         <p id="pptLegacyExtractHint" class="legacy-hint hidden">
-                            ℹ️ Định dạng <strong>.PPT cũ</strong> chỉ hỗ trợ tách từng slide thành bộ ảnh HD (.JPG). Nếu cần lấy ảnh nhúng gốc, vui lòng lưu tệp sang .PPTX.
+                            ℹ️ Định dạng <strong>.PPT nhị phân cũ (97–2003)</strong> cần lưu sang <strong>.PPTX</strong> hoặc <strong>.PDF</strong> để trích xuất tài nguyên trực tiếp trên trình duyệt Offline.
                         </p>
                     </div>
 
@@ -223,17 +235,20 @@
                 </form>
             </section>
 
-            <!-- Step 3: Live Progress Bar -->
+            <!-- Step 3: Live Progress Bar + Cancel -->
             <section id="progressSection" class="glass-panel section-card hidden">
                 <div class="progress-header">
                     <div>
                         <h3 id="progressStatusTitle">Đang xử lý 0/0...</h3>
-                        <p id="progressDetailText" class="progress-subtext">Thuật toán tự động cân chỉnh độ phân giải và chất lượng ảnh tối ưu</p>
+                        <p id="progressDetailText" class="progress-subtext">Thuật toán tự động cân chỉnh độ phân giải và chất lượng ảnh tối ưu ngay trên trình duyệt</p>
                     </div>
-                    <span id="progressPercentBadge" class="percent-badge">0%</span>
+                    <div class="progress-right-controls">
+                        <span id="progressPercentBadge" class="percent-badge">0%</span>
+                        <button id="cancelJobBtn" type="button" class="danger-outline-btn">✕ Huỷ tác vụ</button>
+                    </div>
                 </div>
                 <div class="progress-track">
-                    <div id="progressBarFill" class="progress-fill" style="width: 0%"></div>
+                    <div id="progressBarFill" class="progress-fill"></div>
                 </div>
             </section>
 
@@ -344,8 +359,48 @@
                 </div>
             </div>
         </div>
+
+        <!-- Local History & Offline Data Backup Modal -->
+        <div id="historyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
+            <div class="modal-content history-modal-card glass-panel">
+                <div class="modal-header">
+                    <div>
+                        <h4 id="historyModalTitle">🗂️ Lịch sử &amp; Dữ liệu Offline trên thiết bị</h4>
+                        <p class="modal-subtitle">Lưu trữ cục bộ bằng IndexedDB (Dexie.js) • Tối đa 30 bản ghi gần nhất • Không gửi lên máy chủ</p>
+                    </div>
+                    <button id="closeHistoryModalBtn" type="button" class="secondary-btn">Đóng</button>
+                </div>
+
+                <div class="data-backup-toolbar">
+                    <button id="exportDataBtn" type="button" class="icon-btn">⬇️ Xuất dữ liệu (.json)</button>
+                    <button id="importDataBtn" type="button" class="icon-btn">⬆️ Nhập dữ liệu (.json)</button>
+                    <input type="file" id="importDataInput" accept=".json,application/json" hidden>
+                    <button id="clearDataBtn" type="button" class="danger-outline-btn">🗑️ Xoá dữ liệu máy</button>
+                </div>
+
+                <div id="confirmClearBar" class="confirm-clear-bar hidden">
+                    <span>Bạn có chắc chắn muốn xoá toàn bộ lịch sử &amp; tùy chọn đã lưu trên thiết bị này?</span>
+                    <div class="confirm-clear-actions">
+                        <button id="confirmClearYesBtn" type="button" class="danger-solid-btn">Xác nhận xoá</button>
+                        <button id="confirmClearNoBtn" type="button" class="secondary-btn">Giữ lại</button>
+                    </div>
+                </div>
+
+                <div id="historyFeedbackBanner" class="history-feedback hidden" role="status"></div>
+
+                <div class="history-list-scroll">
+                    <div id="historyEmptyState" class="history-empty-state">
+                        Chưa có lịch sử xử lý nào được lưu trên thiết bị này.
+                    </div>
+                    <div id="historyListContainer" class="history-list"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="vendor/dexie.min.js"></script>
+    <script src="vendor/jszip.min.js"></script>
+    <script src="vendor/pdf-lib.min.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>

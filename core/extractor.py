@@ -15,7 +15,10 @@ from .pptx_compressor import (
     IMAGE_EXTENSIONS,
     _export_pptx_to_pdf_via_com,
     _iter_pptx_slides_pil,
+    _validate_zip_safety,
 )
+
+Image.MAX_IMAGE_PIXELS = 64_000_000
 
 STORED_MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -106,6 +109,9 @@ def extract_archive(
 
     if ext == ".pptx" and not is_zip:
         raise ValueError("Tệp .pptx bị hỏng hoặc không đúng cấu trúc ZIP.")
+    if is_zip:
+        with zipfile.ZipFile(str(in_path), "r") as zf:
+            _validate_zip_safety(zf)
 
     ft = (file_type or "").lower().strip().lstrip(".")
     if ext == ".ppt" and not is_zip:

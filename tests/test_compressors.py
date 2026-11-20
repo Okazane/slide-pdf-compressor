@@ -1208,3 +1208,213 @@ def test_ui_static_assets_target_met_and_ttl_cleanup(
     assert not stale_up.exists(), "TTL cleanup should remove >2h old upload file"
     assert not stale_out.exists(), "TTL cleanup should remove >2h old output file"
     assert fresh_up.exists(), "TTL cleanup must preserve fresh upload file"
+
+
+# ---------------------------------------------------------------------------
+# 7. Security Hardening & Offline PWA Asset Serving Tests
+# ---------------------------------------------------------------------------
+
+
+def test_security_fix1_hex_id_glob_traversal_and_pwa_routes(tmp_path: Path):
+    import app as app_mod
+
+    client = TestClient(app_mod.app)
+
+    # /api/health endpoint
+    r_health = client.get("/api/health")
+    assert r_health.status_code == 200
+    hdata = r_health.json()
+    assert hdata["status"] == "ok"
+    assert hdata["engine"] == "local-python"
+
+    # PWA root static assets served cleanly
+    for route in [
+        "/manifest.json",
+        "/sw.js",
+        "/favicon.svg",
+        "/fonts.css",
+        "/style.css",
+        "/db.js",
+        "/offline-engine.js",
+        "/app.js",
+        "/icons/icon-192.png",
+        "/icons/icon-512.png",
+        "/vendor/dexie.min.js",
+    ]:
+        resp = client.get(route)
+        assert resp.status_code == 200, f"PWA route {route} failed with {resp.status_code}"
+    assert "no-cache" in client.get("/sw.js").headers.get("cache-control", "")
+
+    # Reject glob / path traversal / malformed file_id & job_id
+    malicious_ids = [
+        "*",
+        "????????????",
+        "[0-9a-f]*",
+        "../app.py",
+        "..\\app.py",
+        "aabbccddeeff/../../secret",
+        "AABBCCDDEEFF",
+        "short123",
+    ]
+    for bad_id in malicious_ids:
+        r_c = client.post("/api/compress", json={"file_id": bad_id, "target_mb": 5.0})
+        assert r_c.status_code == 400, f"Expected 400 for file_id={bad_id!r}, got {r_c.status_code}"
+
+        r_e = client.post("/api/extract", json={"file_id": bad_id, "extract_mode": "images"})
+        assert r_e.status_code == 400, f"Expected 400 for file_id={bad_id!r}, got {r_e.status_code}"
+
+    from urllib.parse import quote as url_quote
+
+    for bad_job in ["*", "????????????", "[a-f]*", "AABBCCDDEEFF", "short"]:
+        encoded_job = url_quote(bad_job, safe="")
+        assert client.get(f"/api/job/{encoded_job}").status_code == 400
+        assert client.get(f"/api/download/{encoded_job}").status_code == 400
+
+    # Verify download rejects output_path outside OUTPUTS_DIR even if registry were tampered
+    outside_file = tmp_path / "secret_outside.pdf"
+    outside_file.write_bytes(b"%PDF-1.4 secret")
+    tampered_jid = "deadbeef1234"
+    with app_mod.REGISTRY_LOCK:
+        app_mod.JOBS[tampered_jid] = {
+            "job_id": tampered_jid,
+            "file_id": "cafebabe1234",
+            "status": "done",
+            "output_path": str(outside_file),
+            "output_filename": "secret.pdf",
+            "created_at": time.time(),
+        }
+    try:
+        r_tampered = client.get(f"/api/download/{tampered_jid}")
+        assert r_tampered.status_code == 404
+    finally:
+        with app_mod.REGISTRY_LOCK:
+            app_mod.JOBS.pop(tampered_jid, None)
+
+
+def test_security_fix2_zip_bomb_path_traversal_and_xml_entity_rejection(
+    synthetic_pptx: Path, tmp_path: Path
+):
+    from app import app
+    from core.extractor import extract_archive
+    from core.pptx_compressor import (
+        _rewrite_content_types_xml,
+        _rewrite_rels_xml,
+        compress_pptx_direct,
+        inspect_pptx,
+    )
+
+    assert Image.MAX_IMAGE_PIXELS == 64_000_000
+
+    # 1. XML <!ENTITY / <!DOCTYPE rejection (Billion Laughs / XXE)
+    xxe_xml = (
+        b'<?xml version="1.0"?>'
+        b'<!DOCTYPE lolz [<!ENTITY lol "boom">]>'
+        b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">&lol;</Types>'
+    )
+    with pytest.raises(ValueError):
+        _rewrite_content_types_xml(xxe_xml, {"ppt/media/a.png": "ppt/media/a.jpg"})
+    with pytest.raises(ValueError):
+        _rewrite_rels_xml(xxe_xml, "ppt/slides/_rels/slide1.xml.rels", {"ppt/media/a.png": "ppt/media/a.jpg"})
+
+    xxe_pptx = tmp_path / "xxe_bomb.pptx"
+    with zipfile.ZipFile(str(synthetic_pptx), "r") as zin, zipfile.ZipFile(
+        str(xxe_pptx), "w", compression=zipfile.ZIP_DEFLATED
+    ) as zout:
+        for info in zin.infolist():
+            if info.filename == "[Content_Types].xml":
+                zout.writestr(info.filename, xxe_xml)
+            else:
+                zout.writestr(info, zin.read(info.filename))
+
+    with pytest.raises(ValueError):
+        inspect_pptx(str(xxe_pptx))
+    with pytest.raises(ValueError):
+        compress_pptx_direct(str(xxe_pptx), str(tmp_path / "no_out.pptx"))
+
+    client = TestClient(app)
+    with open(xxe_pptx, "rb") as f:
+        r_xxe = client.post(
+            "/api/analyze",
+            files={"file": ("evil_xxe.pptx", f, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        )
+    assert r_xxe.status_code == 400
+
+    # 2. Zip-Slip path traversal entry inside .pptx
+    traversal_pptx = tmp_path / "zip_slip.pptx"
+    with zipfile.ZipFile(str(traversal_pptx), "w") as zout:
+        zout.writestr("[Content_Types].xml", b"<Types/>")
+        zout.writestr("../../evil.txt", b"pwn")
+
+    with pytest.raises(ValueError):
+        inspect_pptx(str(traversal_pptx))
+    with pytest.raises(ValueError):
+        extract_archive(str(traversal_pptx), str(tmp_path / "no_zip.zip"), file_type="pptx")
+
+    # 3. Entry-count ZIP bomb (> 5,000 entries)
+    many_entries_pptx = tmp_path / "entry_bomb.pptx"
+    with zipfile.ZipFile(str(many_entries_pptx), "w", compression=zipfile.ZIP_STORED) as zout:
+        for idx in range(5005):
+            zout.writestr(f"ppt/media/tiny_{idx}.txt", b"a")
+
+    with pytest.raises(ValueError):
+        inspect_pptx(str(many_entries_pptx))
+    with open(many_entries_pptx, "rb") as f:
+        r_bomb = client.post(
+            "/api/analyze",
+            files={"file": ("entry_bomb.pptx", f, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        )
+    assert r_bomb.status_code == 400
+
+
+def test_security_fix3_and_fix4_bounded_queue_cors_and_sanitized_errors(
+    synthetic_multipage_pdf: Path, monkeypatch
+):
+    import app as app_mod
+
+    client = TestClient(app_mod.app)
+
+    # 1. Safe CORS: external untrusted origin does not get wildcard/credentials reflection
+    r_cors = client.options(
+        "/api/health",
+        headers={
+            "Origin": "https://malicious.example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert r_cors.headers.get("access-control-allow-origin") != "*"
+    assert r_cors.headers.get("access-control-allow-credentials") != "true"
+
+    # 2. Bounded queue returns HTTP 429 when pending running jobs reach MAX_PENDING_JOBS
+    with open(synthetic_multipage_pdf, "rb") as f:
+        r_up = client.post(
+            "/api/analyze",
+            files={"file": ("queue_test.pdf", f, "application/pdf")},
+        )
+    assert r_up.status_code == 200
+    fid = r_up.json()["file_id"]
+
+    monkeypatch.setattr(app_mod, "MAX_PENDING_JOBS", 1)
+    dummy_jid = "112233445566"
+    with app_mod.REGISTRY_LOCK:
+        app_mod.JOBS[dummy_jid] = {
+            "job_id": dummy_jid,
+            "file_id": fid,
+            "status": "running",
+            "created_at": time.time(),
+        }
+    try:
+        r_429_comp = client.post("/api/compress", json={"file_id": fid, "target_mb": 2.0})
+        assert r_429_comp.status_code == 429
+        r_429_ext = client.post("/api/extract", json={"file_id": fid, "extract_mode": "images"})
+        assert r_429_ext.status_code == 429
+    finally:
+        with app_mod.REGISTRY_LOCK:
+            app_mod.JOBS.pop(dummy_jid, None)
+
+    # 3. Error sanitization: internal exception never leaks server filesystem paths
+    err_msg = app_mod._sanitize_worker_error(
+        OSError(r"Permission denied: C:\Users\SecretAdmin\uploads\private.pdf"),
+        "nén tệp",
+    )
+    assert "SecretAdmin" not in err_msg
+    assert "C:\\" not in err_msg

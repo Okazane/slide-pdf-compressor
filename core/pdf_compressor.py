@@ -18,6 +18,8 @@ from pypdf.generic import (
     StreamObject,
 )
 
+Image.MAX_IMAGE_PIXELS = 64_000_000
+
 # Buffer tuple: (jpeg_bytes, px_w, px_h, w_pt, h_pt)
 PageJpegBuffer = tuple[bytes, int, int, float, float]
 

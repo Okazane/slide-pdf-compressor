@@ -8,5 +8,6 @@ outputs/
 .env
 .venv/
 venv/
-
+node_modules/
+package-lock.json
 .vercel
